@@ -36,7 +36,7 @@ struct GameDetailView: View {
                     GameConfigForm(config: Binding(
                         get: { app.game(gameID)?.config ?? .default },
                         set: { newValue in app.update(gameID) { $0.config = newValue } }),
-                        showsEngine: true)
+                        showsEngine: true, steamOptions: game.source == .steam)
                     gameTools(game)
                 }
                 .transition(.move(edge: .trailing))

@@ -742,13 +742,24 @@ final class AppState {
                 update(id) { $0.lastPlayed = .now }
                 return
             }
-            guard let exe = game.executablePath else { throw GOGService.GOGError.noExecutable }
+            guard let exe = game.executablePath, FileManager.default.fileExists(atPath: exe) else {
+                throw GOGService.GOGError.noExecutable
+            }
             let ctx = try await preparedContext(for: game)
             try Task.checkCancellation()
             let log = Paths.logs.appendingPathComponent("\(game.prefixName).log")
-            let process = try WineRunner.launch(
-                ctx, executable: exe, arguments: [],
-                workingDirectory: game.workingDirectory.map { URL(fileURLWithPath: $0) }, log: log)
+            let workDir = game.workingDirectory.map { URL(fileURLWithPath: $0) }
+
+            let process: Process
+            if game.source == .steam {
+                // Native Steam: start through gbe_fork's loader so Steamworks calls are answered.
+                setActivity(id, game.title, "Preparing Steam emulation…", nil)
+                let plan = try await prepareSteamLaunch(game, ctx: ctx, exe: URL(fileURLWithPath: exe), workDir: workDir)
+                process = try WineRunner.launch(ctx, executable: plan.loader.path, arguments: [],
+                                                workingDirectory: plan.steamDir, log: log)
+            } else {
+                process = try WineRunner.launch(ctx, executable: exe, arguments: [], workingDirectory: workDir, log: log)
+            }
             endActivity(id)
             running.insert(id)
             processes[id] = process
@@ -756,6 +767,8 @@ final class AppState {
             update(id) { $0.lastPlayed = started }
             process.terminationHandler = { [weak self] _ in
                 Task { @MainActor in
+                    // Loaders and launchers exit early; the game is over when its prefix goes idle.
+                    try? await WineRunner.waitForWineserver(ctx)
                     guard let self else { return }
                     self.running.remove(id)
                     self.processes[id] = nil
@@ -766,6 +779,24 @@ final class AppState {
             endActivity(id)
             report(error)
         }
+    }
+
+    private func prepareSteamLaunch(_ game: Game, ctx: WineContext, exe: URL, workDir: URL?) async throws -> SteamLauncher.Plan {
+        guard let appID = UInt32(game.externalID), let account = steam.account else {
+            throw SteamError(message: "Sign in to Steam in Settings → Accounts to play \(game.title).")
+        }
+        // A ticket proves ownership to games that check it; play offline without one if Steam is unreachable.
+        var ticket: Data?
+        if (try? await steam.ensureOnline()) != nil {
+            ticket = try? await steam.session.encryptedAppTicket(appID: appID)
+        }
+        let app = steam.apps[appID]
+        let owned = steam.ownership?.appIDs ?? []
+        let dlc = (app?.dlcAppIDs ?? []).filter { owned.contains($0) }
+        return try await SteamLauncher.prepare(
+            prefix: ctx.prefix, appID: appID, app: app, executable: exe, workingDirectory: workDir,
+            arguments: game.steamLaunchArguments ?? "", account: account, ownedDLC: dlc, ticket: ticket,
+            injectStubPatcher: game.config.stripSteamStub, engines: engines)
     }
 
     func stop(_ game: Game) async {

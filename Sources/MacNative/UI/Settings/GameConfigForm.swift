@@ -6,11 +6,24 @@ struct GameConfigForm: View {
     @Environment(AppState.self) private var app
     @Binding var config: GameConfig
     var showsEngine: Bool
+    /// Show Steam-only options (launch mode, DRM).
+    var steamOptions = false
 
     private static let desktopSizes = ["1280x720", "1280x800", "1440x900", "1600x900", "1920x1080", "1920x1200", "2560x1440"]
     private static let fpsOptions = [0, 30, 60, 90, 120]
 
     var body: some View {
+        if steamOptions {
+            SettingsCard(title: "Steam", subtitle: "Native mode runs without the Steam client, through gbe_fork") {
+                toggle("macwindow", Theme.statusAvailable, "Use the Windows Steam client",
+                       "Fallback for heavy DRM or anti-cheat. The client must install the game itself.", $config.useSteamClient)
+                if !config.useSteamClient {
+                    toggle("lock.open.fill", Theme.warning, "Patch SteamStub DRM in memory",
+                           "Only for games that refuse to start natively. Uses gbe_fork's stub patcher; off by default.",
+                           $config.stripSteamStub)
+                }
+            }
+        }
         SettingsCard(title: "Graphics", subtitle: "How DirectX is translated to Metal") {
             if config.graphics == .d3dmetal {
                 SettingsRow(symbol: "wineglass", tint: Theme.pink, title: "Wine engine",
