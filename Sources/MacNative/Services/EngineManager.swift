@@ -7,9 +7,15 @@ struct EngineRelease: Identifiable, Hashable, Codable {
     var id: String          // e.g. "wine-staging-11.18"
     var name: String        // e.g. "Wine Staging 11.18"
     var version: String
-    var flavor: String      // "staging" | "devel" | "gptk"
+    var flavor: String      // "stable" | "devel" | "staging" | "gptk" | "crossover" | "wine"
     var url: URL
     var sizeBytes: Int64
+    var publishedAt: Date?
+
+    /// Builds from Sikarugir's public engine archive ship as `wswine.bundle` and rely on
+    /// a few shared libraries that MacNative supplies from a Gcenx engine.
+    var isWSBundle: Bool { url.lastPathComponent.hasPrefix("WS") }
+    var isGcenxWine: Bool { ["stable", "devel", "staging"].contains(flavor) }
 }
 
 struct InstalledEngine: Identifiable, Hashable, Codable {
@@ -49,6 +55,8 @@ struct ComponentRelease: Identifiable, Hashable, Codable {
 final class EngineManager {
     private(set) var installed: [InstalledEngine] = []
     private(set) var available: [EngineRelease] = []
+    /// CrossOver-based and other alternative builds (Sikarugir's public engine archive).
+    private(set) var alternatives: [EngineRelease] = []
     private(set) var isLoadingCatalog = false
     var catalogError: String?
 
@@ -115,25 +123,28 @@ final class EngineManager {
         isLoadingCatalog = true
         defer { isLoadingCatalog = false }
         do {
-            let url = URL(string: "https://api.github.com/repos/Gcenx/macOS_Wine_builds/releases?per_page=6")!
+            let url = URL(string: "https://api.github.com/repos/Gcenx/macOS_Wine_builds/releases?per_page=100")!
             let (data, _) = try await URLSession.shared.data(from: url)
-            let releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
+            let releases = try JSONDecoder.iso.decode([GitHubRelease].self, from: data)
             available = releases.flatMap { r in
                 r.assets.compactMap { a -> EngineRelease? in
                     guard a.name.hasSuffix("-osx64.tar.xz") else { return nil }
-                    let flavor = a.name.hasPrefix("wine-staging") ? "staging"
-                        : a.name.hasPrefix("wine-devel") ? "devel" : nil
-                    guard let flavor else { return nil }
+                    guard let flavor = ["staging", "devel", "stable"].first(where: { a.name.hasPrefix("wine-\($0)") }) else {
+                        return nil
+                    }
                     return EngineRelease(
                         id: "wine-\(flavor)-\(r.tag_name)", name: "Wine \(flavor.capitalized) \(r.tag_name)",
-                        version: r.tag_name, flavor: flavor, url: a.browser_download_url, sizeBytes: a.size)
+                        version: r.tag_name, flavor: flavor, url: a.browser_download_url, sizeBytes: a.size,
+                        publishedAt: r.published_at)
                 }
             }
+            .sorted { ($0.publishedAt ?? .distantPast, $0.flavor) > ($1.publishedAt ?? .distantPast, $1.flavor) }
             catalogError = nil
         } catch {
             catalogError = "Couldn't reach GitHub, showing the bundled default."
         }
         if available.isEmpty { available = [Self.fallbackEngine] }
+        alternatives = await Self.fetchAlternatives()
 
         if let url = URL(string: "https://api.github.com/repos/Gcenx/game-porting-toolkit/releases?per_page=1"),
            let (data, _) = try? await URLSession.shared.data(from: url),
@@ -161,7 +172,7 @@ final class EngineManager {
         try? FileManager.default.removeItem(at: staging)
         try? FileManager.default.removeItem(at: target)
         do {
-            try await extractEngine(archive, staging: staging, target: target)
+            try await extractEngine(archive, release: release, staging: staging, target: target)
         } catch {
             // Cancelled or failed: leave nothing half-installed behind.
             try? FileManager.default.removeItem(at: staging)
@@ -175,7 +186,26 @@ final class EngineManager {
         reloadInstalled()
     }
 
-    private func extractEngine(_ archive: URL, staging: URL, target: URL) async throws {
+    private func extractEngine(_ archive: URL, release: EngineRelease, staging: URL, target: URL) async throws {
+        if release.isWSBundle {
+            // Layout: wswine.bundle/{bin,lib,share}. Its binaries look for shared libraries one level
+            // above the bundle (@loader_path/../../), so clone a Gcenx engine's libraries there.
+            guard let donor = installed.first(where: { $0.flavor.map { ["stable", "devel", "staging"].contains($0) } ?? true }) else {
+                throw SteamError(message: "Install a regular Wine engine first — \(release.name) borrows its libraries.")
+            }
+            try await Shell.extract(archive, to: staging)
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: staging.appendingPathComponent("wswine.bundle"),
+                                             to: target.appendingPathComponent("wine"))
+            try? FileManager.default.removeItem(at: staging)
+            let libs = donor.wineRoot.appendingPathComponent("lib")
+            for file in (try? FileManager.default.contentsOfDirectory(atPath: libs.path)) ?? [] where file.hasSuffix(".dylib") {
+                try await Shell.run("/bin/cp", ["-c", libs.appendingPathComponent(file).path, target.path])
+            }
+            _ = try? await Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", target.path])
+            try Task.checkCancellation()
+            return
+        }
         // Archive layout: "Wine Staging.app/Contents/Resources/wine/{bin,lib,share}". Only that
         // subtree is wanted (the .app's own launcher would collide with the stripped `wine` folder).
         try await Shell.extract(archive, to: staging, stripComponents: 3, include: "*/Contents/Resources/wine/*")
@@ -186,6 +216,13 @@ final class EngineManager {
         // Downloaded files are quarantined; clear it so Gatekeeper doesn't block every dylib.
         _ = try? await Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", target.path])
         try Task.checkCancellation()
+    }
+
+    /// Engines from bundles keep shared dylibs beside the `wine` folder; variants need them as well.
+    static func cloneSharedLibraries(from dir: URL, to dest: URL) async throws {
+        for file in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where file.hasSuffix(".dylib") {
+            try await Shell.run("/bin/cp", ["-c", dir.appendingPathComponent(file).path, dest.path])
+        }
     }
 
     func uninstall(_ engine: InstalledEngine) throws {
@@ -222,6 +259,7 @@ final class EngineManager {
         try? FileManager.default.removeItem(at: variant)
         try FileManager.default.createDirectory(at: variant, withIntermediateDirectories: true)
         try await Shell.run("/bin/cp", ["-cR", engine.wineRoot.path, wine.path])
+        try await Self.cloneSharedLibraries(from: engine.directory, to: variant)
         for arch in ["x86_64-windows", "i386-windows", "x86_64-unix"] {
             let src = dxmt.appendingPathComponent(arch)
             let dst = wine.appendingPathComponent("lib/wine/\(arch)")
@@ -238,7 +276,52 @@ final class EngineManager {
 private struct GitHubRelease: Decodable {
     struct Asset: Decodable { var name: String; var size: Int64; var browser_download_url: URL }
     var tag_name: String
+    var published_at: Date?
     var assets: [Asset]
+}
+
+extension EngineManager {
+    /// Lists CrossOver-based (and other) open-source Wine builds from Sikarugir's public engine
+    /// archive — downloaded as plain tarballs, no Sikarugir app involved. Keeps the newest revision of
+    /// each build and skips variants MacNative doesn't need (32-bit-only, GPTK, single-game builds).
+    fileprivate static func fetchAlternatives() async -> [EngineRelease] {
+        guard let url = URL(string: "https://api.github.com/repos/Sikarugir-App/Engines/releases?per_page=20"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let releases = try? JSONDecoder.iso.decode([GitHubRelease].self, from: data) else { return [] }
+        let pattern = #/^WS(\d+)(.+?)(?:_(\d+))?\.tar\.xz$/#
+        var best: [String: (rank: (Int, Int), release: EngineRelease)] = [:]
+        for r in releases {
+            for a in r.assets {
+                guard let m = a.name.wholeMatch(of: pattern) else { continue }
+                let base = String(m.2)
+                if base.contains("32Bit") || base.contains("GPTK") || base.contains("-") { continue }
+                let rank = (Int(m.1) ?? 0, Int(m.3 ?? "0") ?? 0)
+                guard let (name, version, flavor) = describe(base) else { continue }
+                let release = EngineRelease(id: "ws-\(base.lowercased())", name: name, version: version,
+                                            flavor: flavor, url: a.browser_download_url, sizeBytes: a.size,
+                                            publishedAt: r.published_at)
+                if let existing = best[base], existing.rank >= rank { continue }
+                best[base] = (rank, release)
+            }
+        }
+        return best.values.map(\.release).sorted { $0.name.localizedStandardCompare($1.name) == .orderedDescending }
+    }
+
+    private static func describe(_ base: String) -> (String, String, String)? {
+        let prefixes: [(String, String, String)] = [
+            ("WineCX", "CrossOver Wine", "crossover"),
+            ("WhiskyWine", "Whisky Wine", "crossover"),
+            ("WineSikarugir", "Wine", "wine"),
+            ("Wine", "Wine", "wine"),
+        ]
+        for (prefix, label, flavor) in prefixes where base.hasPrefix(prefix) {
+            let version = String(base.dropFirst(prefix.count))
+            guard version.first?.isNumber == true else { return nil }
+            let suffix = prefix == "WineSikarugir" ? " (Sikarugir build)" : ""
+            return ("\(label) \(version)\(suffix)", version, flavor)
+        }
+        return nil
+    }
 }
 
 extension JSONDecoder {

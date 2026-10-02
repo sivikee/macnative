@@ -83,6 +83,37 @@ struct SettingsView: View {
 
 private struct EnginesSection: View {
     @Environment(AppState.self) private var app
+    @State private var showOlder = false
+
+    @ViewBuilder private func releaseRow(_ r: EngineRelease) -> some View {
+        let installed = app.engines.installed.contains { $0.id == r.id }
+        let activity = app.activities["engine:\(r.id)"]
+        let symbol = switch r.flavor {
+            case "staging": "star.fill"
+            case "stable": "checkmark.seal.fill"
+            case "crossover": "wineglass.fill"
+            default: "hammer.fill"
+        }
+        let tint = switch r.flavor {
+            case "staging": Theme.warning
+            case "stable": Theme.success
+            case "crossover": Theme.pink
+            default: Theme.purple
+        }
+        let date = r.publishedAt.map { " · \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+        SettingsRow(symbol: symbol, tint: tint,
+                    title: r.name + (r.id == app.engines.recommended.id ? "  ·  Recommended" : ""),
+                    subtitle: activity?.detail ?? "\(Format.bytes(r.sizeBytes))\(date)") {
+            if let activity {
+                GradientProgressBar(progress: activity.progress).frame(width: 140)
+                CancelJobButton(jobID: "engine:\(r.id)")
+            } else if installed {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.statusInstalled)
+            } else {
+                Button("Download") { app.installEngine(r) }.buttonStyle(PillButtonStyle())
+            }
+        }
+    }
 
     var body: some View {
         @Bindable var app = app
@@ -108,27 +139,29 @@ private struct EnginesSection: View {
             }
         }
 
-        SettingsCard(title: "Available", subtitle: app.engines.catalogError ?? "Upstream Wine builds for macOS by Gcenx, with MoltenVK bundled") {
-            if app.engines.isLoadingCatalog {
-                ProgressView().controlSize(.small).padding(20)
-            }
-            ForEach(app.engines.available) { r in
-                let installed = app.engines.installed.contains { $0.id == r.id }
-                let activity = app.activities["engine:\(r.id)"]
-                SettingsRow(symbol: r.flavor == "staging" ? "star.fill" : "hammer.fill",
-                            tint: r.flavor == "staging" ? Theme.warning : Theme.purple,
-                            title: r.name + (r.id == app.engines.recommended.id ? "  ·  Recommended" : ""),
-                            subtitle: activity?.detail ?? Format.bytes(r.sizeBytes)) {
-                    if let activity {
-                        GradientProgressBar(progress: activity.progress).frame(width: 140)
-                        CancelJobButton(jobID: "engine:\(r.id)")
-                    } else if installed {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.statusInstalled)
-                    } else {
-                        Button("Download") { app.installEngine(r) }
-                            .buttonStyle(PillButtonStyle())
-                    }
+        let all = app.engines.available
+        let newest = Array(all.prefix(3))
+        let older = Array(all.dropFirst(3))
+        SettingsCard(title: "Wine", subtitle: app.engines.catalogError ?? "Upstream Wine for macOS by Gcenx, with MoltenVK bundled. Newest first") {
+            if app.engines.isLoadingCatalog { ProgressView().controlSize(.small).padding(20) }
+            ForEach(newest) { releaseRow($0) }
+            if !older.isEmpty {
+                Button {
+                    withAnimation { showOlder.toggle() }
+                } label: {
+                    Label(showOlder ? "Hide older versions" : "Show \(older.count) older versions",
+                          systemImage: showOlder ? "chevron.up" : "chevron.down")
+                        .font(Theme.font(13, .medium)).foregroundStyle(Theme.tertiary)
                 }
+                .buttonStyle(.plain).padding(.horizontal, 20).padding(.vertical, 8)
+                if showOlder { ForEach(older) { releaseRow($0) } }
+            }
+        }
+
+        if !app.engines.alternatives.isEmpty {
+            SettingsCard(title: "CrossOver-based & other builds",
+                         subtitle: "Open-source builds from Sikarugir's public engine archive (just the files, no Sikarugir app). They share libraries with your Wine engine above") {
+                ForEach(app.engines.alternatives) { releaseRow($0) }
             }
         }
 

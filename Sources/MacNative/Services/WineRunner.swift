@@ -23,6 +23,9 @@ struct WineContext {
             "TMPDIR": NSTemporaryDirectory(),
             "LANG": "en_US.UTF-8",
             "PATH": "\(wineRoot.path)/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            // Engines from bundles load shared libraries (FreeType, GnuTLS, MoltenVK…) from beside the
+            // `wine` folder; Gcenx engines carry them in lib/.
+            "DYLD_FALLBACK_LIBRARY_PATH": "\(wineRoot.deletingLastPathComponent().path):\(wineRoot.path)/lib:/usr/lib",
             "WINEPREFIX": prefix.path,
             "WINEDEBUG": verboseLogging ? "err+all,warn+module,fixme-all" : "-all",
             // Recover instead of crashing when Metal reports a lost device (common on mode switches).
