@@ -393,7 +393,23 @@ private struct SystemSection: View {
 // MARK: - About
 
 private struct AboutSection: View {
+    @Environment(AppState.self) private var app
+
     var body: some View {
+        let u = app.updater
+        SettingsCard(title: "Updates") {
+            SettingsRow(symbol: "arrow.down.circle.fill", tint: Theme.tertiary,
+                        title: u.available.map { "Version \($0.version) is available" } ?? "MacNative \(u.currentVersion)",
+                        subtitle: !u.canSelfUpdate ? "Development build: update with git pull and scripts/build.sh."
+                            : u.lastError ?? (u.available == nil ? "Checked on every launch. You're up to date." : "Installs in place and relaunches.")) {
+                if u.isChecking { ProgressView().controlSize(.small) }
+                if u.available != nil, u.canSelfUpdate {
+                    Button("Update now") { app.installUpdate() }.buttonStyle(PillButtonStyle())
+                }
+                Button("Check now") { Task { await app.updater.check() } }
+                    .buttonStyle(PillButtonStyle(prominent: false)).disabled(u.isChecking)
+            }
+        }
         SettingsCard(title: "MacNative", subtitle: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev") · GPL-3.0") {
             credit("GameNative", "Design language and container-settings model", "https://github.com/utkarshdalal/GameNative")
             credit("Wine", "Windows compatibility layer (LGPL)", "https://www.winehq.org")

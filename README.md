@@ -133,7 +133,8 @@ Set `MACNATIVE_HOME=/some/folder` to put the data folder anywhere you like.
 - [x] Compatibility database: per-game status badges and known-good configs applied automatically
 - [ ] Controller navigation inside settings screens
 - [ ] Epic Games
-- [ ] Signed and notarized releases with auto-update
+- [x] In-app updates from GitHub Releases
+- [ ] Signed and notarized releases
 
 ## Project layout
 

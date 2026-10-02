@@ -22,6 +22,7 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.22), value: app.route)
         .animation(.easeOut(duration: 0.22), value: app.showSetup)
         .overlay(alignment: .bottom) { toast }
+        .overlay(alignment: .top) { UpdateBanner().padding(.top, 70) }
         .sheet(isPresented: $app.showAddGame) { AddGameSheet() }
         .sheet(isPresented: $app.showGOGLogin) { GOGLoginView() }
         .sheet(isPresented: $app.showSteamLogin) { SteamLoginView() }
@@ -49,6 +50,43 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(8))
                 if app.toast == message { app.toast = nil }
             }
+        }
+    }
+}
+
+/// "A new version is available" banner with one-click update.
+private struct UpdateBanner: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        if app.updater.showBanner, let release = app.updater.available {
+            let activity = app.activities["update"]
+            HStack(spacing: 14) {
+                if let mark = Theme.logoMark {
+                    Image(nsImage: mark).resizable().frame(width: 28, height: 28)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("MacNative \(release.version) is available").font(Theme.font(14, .semibold))
+                    Text(activity?.detail ?? "You have \(app.updater.currentVersion). The update installs and relaunches in a few seconds.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+                if let activity {
+                    GradientProgressBar(progress: activity.progress).frame(width: 120)
+                    CancelJobButton(jobID: "update")
+                } else {
+                    Button("Release notes") { NSWorkspace.shared.open(release.notesURL) }
+                        .buttonStyle(PillButtonStyle(prominent: false))
+                    Button("Update now") { app.installUpdate() }.buttonStyle(PillButtonStyle())
+                    Button { app.updater.dismissedVersion = release.version } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).foregroundStyle(Theme.muted).help("Later")
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surfaceElevated))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.primary.opacity(0.5)))
+            .shadow(color: Theme.primary.opacity(0.25), radius: 20)
+            .frame(maxWidth: 720)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 }

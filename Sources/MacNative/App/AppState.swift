@@ -68,6 +68,7 @@ final class AppState {
     let engines = EngineManager()
     let steam = SteamStore()
     let compat = CompatDB()
+    let updater = Updater()
 
     var route: Route = .library
     var filter: LibraryFilter = .all
@@ -223,6 +224,25 @@ final class AppState {
         applyCompatConfigs()
         await engines.refreshCatalog()
         await refreshLibraries()
+        if updater.canSelfUpdate { await updater.check() }
+    }
+
+    func installUpdate() {
+        guard running.isEmpty else {
+            toast = "Quit your running games first; updating restarts MacNative."
+            return
+        }
+        startJob("update") { [weak self] in
+            guard let self else { return }
+            let title = "MacNative \(self.updater.available?.version ?? "")"
+            self.setActivity("update", title, "Downloading update…", 0)
+            defer { self.endActivity("update") }
+            do {
+                try await self.updater.install(progress: self.progressHandler("update", title, "Downloading update"))
+            } catch {
+                self.report(error)
+            }
+        }
     }
 
     /// Applies known-good settings from the compatibility database to games the player hasn't customized.
