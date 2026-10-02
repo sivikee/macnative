@@ -81,6 +81,9 @@ enum SteamLauncher {
 
         """
         if let ticket { user += "ticket=\(ticket.base64EncodedString())\n" }
+        // ISteamRemoteStorage files go to Steam's own userdata layout (<path>/<appid>/remote),
+        // where Steam Cloud sync picks them up.
+        user += "\n[user::saves]\nlocal_save_path=C:\\Program Files (x86)\\Steam\\userdata\\\(account.accountID)\n"
         try user.write(to: dir.appendingPathComponent("configs.user.ini"), atomically: true, encoding: .utf8)
 
         var appIni = """

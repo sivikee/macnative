@@ -275,6 +275,11 @@ private struct AccountsSection: View {
                     Button("Sign in") { app.showSteamLogin = true }.buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
                 }
             }
+            SettingsRow(symbol: "icloud.and.arrow.up", tint: Theme.tertiary, title: "Steam Cloud saves",
+                        subtitle: "Download newer saves before playing and upload them when you quit") {
+                Toggle("", isOn: Binding(get: { app.settings.steamCloudSync }, set: { app.settings.steamCloudSync = $0 }))
+                    .toggleStyle(.switch).tint(Theme.primary).labelsHidden()
+            }
             let activity = app.activities["steam-client"]
             SettingsRow(symbol: "macwindow", tint: Theme.muted,
                         title: "Windows Steam client (fallback)",

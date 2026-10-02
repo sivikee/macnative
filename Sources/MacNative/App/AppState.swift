@@ -10,6 +10,8 @@ struct AppSettings: Codable {
     var hasCompletedSetup = false
     /// Use the D3DMetal imported from Apple instead of the one bundled with the GPTK engine.
     var useImportedD3DMetal = true
+    /// Sync native Steam games' saves with Steam Cloud before launch and after exit.
+    var steamCloudSync = true
 }
 
 extension AppSettings {
@@ -23,6 +25,7 @@ extension AppSettings {
         keepInstallers = try c.decodeIfPresent(Bool.self, forKey: .keepInstallers) ?? d.keepInstallers
         hasCompletedSetup = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedSetup) ?? d.hasCompletedSetup
         useImportedD3DMetal = try c.decodeIfPresent(Bool.self, forKey: .useImportedD3DMetal) ?? d.useImportedD3DMetal
+        steamCloudSync = try c.decodeIfPresent(Bool.self, forKey: .steamCloudSync) ?? d.steamCloudSync
     }
 }
 
@@ -793,6 +796,19 @@ final class AppState {
             let workDir = game.workingDirectory.map { URL(fileURLWithPath: $0) }
 
             let process: Process
+            let cloud = game.source == .steam ? await steamCloud(for: game, prefix: ctx.prefix) : nil
+            if let cloud {
+                setActivity(id, game.title, "Syncing cloud saves…", nil)
+                await cloud.signalLaunch()
+                do {
+                    let report = try await cloud.download()
+                    if !report.conflicts.isEmpty {
+                        toast = "Cloud saves for \(game.title) changed both here and elsewhere; kept the newest copy of \(report.conflicts.count) file(s)."
+                    }
+                } catch where !Self.isCancellation(error) {
+                    toast = "Couldn't sync cloud saves for \(game.title) (\(error.localizedDescription)). Playing with local saves."
+                }
+            }
             if game.source == .steam {
                 // Native Steam: start through gbe_fork's loader so Steamworks calls are answered.
                 setActivity(id, game.title, "Preparing Steam emulation…", nil)
@@ -815,11 +831,34 @@ final class AppState {
                     self.running.remove(id)
                     self.processes[id] = nil
                     self.update(id) { $0.playTimeSeconds += Date().timeIntervalSince(started) }
+                    if let cloud { await self.uploadCloudSaves(cloud, gameID: id, title: game.title) }
                 }
             }
         } catch {
             endActivity(id)
             report(error)
+        }
+    }
+
+    /// A Steam Cloud syncer for a native Steam game, or nil when sync is off or Steam is unreachable.
+    private func steamCloud(for game: Game, prefix: URL) async -> SteamCloud? {
+        guard settings.steamCloudSync, !game.config.useSteamClient, let appID = UInt32(game.externalID),
+              let account = steam.account, let dir = game.installDirectory,
+              (try? await steam.ensureOnline()) != nil else { return nil }
+        return SteamCloud(session: steam.session, appID: appID, account: account, prefix: prefix,
+                          installDir: URL(fileURLWithPath: dir), patterns: steam.apps[appID]?.savePatterns ?? [])
+    }
+
+    private func uploadCloudSaves(_ cloud: SteamCloud, gameID: String, title: String) async {
+        setActivity(gameID, title, "Uploading cloud saves…", nil)
+        defer { endActivity(gameID) }
+        do {
+            try await steam.ensureOnline()
+            let report = try await cloud.upload()
+            await cloud.signalExit(uploadsRequired: report.uploaded + report.deleted > 0, uploadsCompleted: true)
+        } catch {
+            await cloud.signalExit(uploadsRequired: true, uploadsCompleted: false)
+            toast = "Couldn't upload cloud saves for \(title): \(error.localizedDescription). They'll upload after your next session."
         }
     }
 

@@ -37,6 +37,15 @@ struct SteamAppInfo: Codable, Hashable {
     var dlcAppIDs: [UInt32]
     var parentAppID: UInt32?
 
+    /// Steam Auto-Cloud save locations ("ufs" in PICS). `nil` = info predates cloud support.
+    struct SavePattern: Codable, Hashable {
+        var root: String        // e.g. "WinMyDocuments", "GameInstall"
+        var path: String        // relative, "/"-separated, may contain {64BitSteamID} etc.
+        var pattern: String     // glob, e.g. "*.sav"
+        var recursive: Bool
+    }
+    var savePatterns: [SavePattern]?
+
     var isGame: Bool { type.lowercased() == "game" }
     var isDLC: Bool { type.lowercased() == "dlc" }
     var runsOnWindows: Bool { osList.isEmpty || osList.contains("windows") }
@@ -89,6 +98,15 @@ struct SteamAppInfo: Codable, Hashable {
                                 osList: Self.list(l["config"]?["oslist"]?.string),
                                 type: l["type"]?.string, betaKey: l["config"]?["betakey"]?.string,
                                 description: l["description"]?.string)
+        }
+
+        // Only patterns meant for Windows (or for every platform) apply inside Wine.
+        savePatterns = (kv["ufs"]?["savefiles"]?.children ?? []).compactMap { _, f in
+            guard let root = f["root"]?.string, let pattern = f["pattern"]?.string else { return nil }
+            let platforms = (f["platforms"]?.children ?? []).compactMap { $0.1.string?.lowercased() }
+            if !platforms.isEmpty, !platforms.contains("windows"), !platforms.contains("all") { return nil }
+            return SavePattern(root: root, path: (f["path"]?.string ?? "").replacingOccurrences(of: "\\", with: "/"),
+                               pattern: pattern, recursive: f["recursive"]?.string == "1")
         }
 
         depots = (kv["depots"]?.children ?? []).compactMap { key, d in

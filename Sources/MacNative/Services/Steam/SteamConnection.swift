@@ -198,6 +198,14 @@ actor SteamConnection {
         return try ProtoMessage(p.body)
     }
 
+    /// Sends a service notification (a method with no response).
+    func notify(_ method: String, body build: (inout ProtoWriter) -> Void) async throws {
+        var body = ProtoWriter()
+        build(&body)
+        try await sendRaw(EMsg.serviceMethodCallFromClient.rawValue, steamID: nil, jobID: nil,
+                          targetJobName: method, body: body.data)
+    }
+
     func setSession(steamID: UInt64, sessionID: Int32) {
         self.steamID = steamID
         self.sessionID = sessionID

@@ -201,8 +201,8 @@ final class SteamStore {
         do {
             let owned = try await session.fetchOwnership()
             ownership = owned
-            // Only fetch info for apps we haven't seen; refresh the rest on explicit refresh.
-            let missing = owned.appIDs.filter { apps[$0] == nil }
+            // Fetch info for new apps, and for cached ones from before cloud-save support.
+            let missing = owned.appIDs.filter { apps[$0] == nil || (apps[$0]?.isGame == true && apps[$0]?.savePatterns == nil) }
             let infos = try await session.fetchAppInfo(Array(missing), tokens: owned.appTokens)
             for info in infos { apps[info.appID] = info }
             saveCache()

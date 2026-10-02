@@ -82,7 +82,7 @@ Everything MacNative creates lives in **one folder**: engines, game prefixes, do
                                    Metal
 ```
 
-- **Steam** is a from-scratch, dependency-free Swift implementation. It handles the WebSocket CM connection, hand-written protobuf, `IAuthenticationService` login, licenses and PICS, depot keys, manifest request codes, and CDN chunk download, decryption (AES), decompression (LZMA / zstd / zip) and Adler-32 verification. Games launch through [gbe_fork](https://github.com/Detanup01/gbe_fork)'s ColdClientLoader, set up with your real account ID, owned DLC and an encrypted app ticket from Steam.
+- **Steam** is a from-scratch, dependency-free Swift implementation. It handles the WebSocket CM connection, hand-written protobuf, `IAuthenticationService` login, licenses and PICS, depot keys, manifest request codes, and CDN chunk download, decryption (AES), decompression (LZMA / zstd / zip) and Adler-32 verification. Games launch through [gbe_fork](https://github.com/Detanup01/gbe_fork)'s ColdClientLoader, set up with your real account ID, owned DLC and an encrypted app ticket from Steam. **Steam Cloud** saves sync automatically: newer saves are downloaded before you play, and changes are uploaded when you quit.
 - **Wine** comes from [Gcenx's macOS builds](https://github.com/Gcenx/macOS_Wine_builds), which bundle MoltenVK and SDL2. **D3DMetal** uses [Gcenx's Game Porting Toolkit Wine](https://github.com/Gcenx/game-porting-toolkit), the build Apple's own GPTK Read Me points to. You can import a newer D3DMetal from Apple's GPTK download in Settings → Engines.
 - **Engine variants** for DXMT and an imported D3DMetal are APFS clones of the base engine. They're instant and take no extra disk space.
 
@@ -123,7 +123,8 @@ Set `MACNATIVE_HOME=/some/folder` to put the data folder anywhere you like.
 - [x] Steam: native login, library, downloads, launching via gbe_fork
 - [x] GOG: login, library, silent installs with compatibility fallback
 - [x] WineD3D / DXVK / DXMT / D3DMetal, per-game settings, controller navigation
-- [ ] Steam Cloud saves and achievement sync
+- [x] Steam Cloud saves (download before play, upload after quitting)
+- [ ] Steam achievement sync
 - [ ] Steam game updates, beta branches, file verification, shared redistributables
 - [ ] GOG cloud saves; downloading GOG games through Galaxy's content system instead of installers
 - [ ] Known-good per-game configs applied automatically

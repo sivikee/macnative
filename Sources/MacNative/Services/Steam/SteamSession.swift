@@ -21,6 +21,8 @@ actor SteamSession {
     let connection = SteamConnection()
     private(set) var licenses: [License] = []
     private(set) var cellID: UInt32 = 0
+    /// Identifies this logged-on client to Steam Cloud's launch/exit bookkeeping.
+    private(set) var clientInstanceID: UInt64 = 0
     private var licenseWaiters: [CheckedContinuation<[License], Never>] = []
     private var heartbeat: Task<Void, Never>?
     private var eventPump: Task<Void, Never>?
@@ -144,6 +146,7 @@ actor SteamSession {
                     return
                 }
                 cellID = body.uint32(7) ?? 0
+                clientInstanceID = body.uint64(27) ?? 0
                 isLoggedOn = true
                 startHeartbeat(seconds: Int(body.int32(3) ?? 9))
                 resumeLogon(.success(()))
