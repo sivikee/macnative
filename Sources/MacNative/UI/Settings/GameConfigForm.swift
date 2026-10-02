@@ -31,12 +31,29 @@ struct GameConfigForm: View {
                     Text(app.engineDescription(for: config)).font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
             } else if showsEngine {
-                SettingsRow(symbol: "wineglass", tint: Theme.pink, title: "Wine engine") {
-                    Picker("", selection: $config.engineID) {
+                let installedIDs = Set(app.engines.installed.map(\.id))
+                let downloadable = (app.engines.available + app.engines.alternatives).filter { !installedIDs.contains($0.id) }
+                SettingsRow(symbol: "wineglass", tint: Theme.pink, title: "Wine engine",
+                            subtitle: config.engineID.flatMap { id in installedIDs.contains(id) ? nil : "Downloads before the next launch" }) {
+                    Picker("", selection: Binding(
+                        get: { config.engineID },
+                        set: { id in
+                            config.engineID = id
+                            // Start downloading a not-yet-installed engine right away.
+                            if let id, !installedIDs.contains(id),
+                               let release = downloadable.first(where: { $0.id == id }) { app.installEngine(release) }
+                        })) {
                         Text("Default").tag(String?.none)
-                        ForEach(app.engines.regularEngines) { e in Text(e.name).tag(String?.some(e.id)) }
+                        Section("Installed") {
+                            ForEach(app.engines.regularEngines) { e in Text(e.name).tag(String?.some(e.id)) }
+                        }
+                        if !downloadable.isEmpty {
+                            Section("Download") {
+                                ForEach(downloadable) { r in Text("\(r.name) (\(Format.bytes(r.sizeBytes)))").tag(String?.some(r.id)) }
+                            }
+                        }
                     }
-                    .labelsHidden().frame(width: 200)
+                    .labelsHidden().frame(width: 220)
                 }
             }
             SettingsRow(symbol: "cube.transparent", tint: Theme.tertiary, title: "Graphics backend",

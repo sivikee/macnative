@@ -366,6 +366,27 @@ final class AppState {
                            config: config, verboseLogging: settings.verboseWineLogging)
     }
 
+    /// Downloads a game's chosen engine if it isn't installed yet (e.g. picked from the Download list).
+    private func ensureChosenEngine(_ config: GameConfig, activityID: String, title: String) async throws {
+        guard config.graphics != .d3dmetal, let id = config.engineID,
+              !engines.installed.contains(where: { $0.id == id }) else { return }
+        guard let release = (engines.available + engines.alternatives).first(where: { $0.id == id }) else {
+            throw SteamError(message: "The Wine engine chosen for \(title) is no longer available. Pick another in its settings.")
+        }
+        // Wait for a download that's already running (started from the picker), else start one here.
+        if let job = jobs["engine:\(id)"] {
+            setActivity(activityID, title, "Waiting for \(release.name) to download…", nil)
+            await job.value
+        } else {
+            setActivity(activityID, title, "Downloading \(release.name)…", 0)
+            try await engines.install(release, progress: progressHandler(activityID, title, "Downloading \(release.name)"))
+        }
+        guard engines.installed.contains(where: { $0.id == id }) else {
+            throw SteamError(message: "\(release.name) couldn't be installed.")
+        }
+        setActivity(activityID, title, "Preparing…", nil)
+    }
+
     /// Downloads the GPTK engine the first time a D3DMetal game launches, reporting into `activityID`.
     private func ensureD3DMetalEngine(_ config: GameConfig, activityID: String, title: String) async throws {
         guard config.graphics == .d3dmetal, engines.gptkEngine == nil else { return }
@@ -756,6 +777,7 @@ final class AppState {
         }
         do {
             try await ensureD3DMetalEngine(game.config, activityID: id, title: game.title)
+            try await ensureChosenEngine(game.config, activityID: id, title: game.title)
             if game.source == .steam, game.config.useSteamClient {
                 try await openSteam(arguments: ["-applaunch", game.externalID], config: game.config)
                 endActivity(id)

@@ -202,7 +202,9 @@ struct GameDetailView: View {
                 InfoCard(label: "Location", value: dir)
             }
             if game.source == .steam {
-                Text("Steam games launch through the Windows Steam client, so Steam overlay, cloud saves and achievements keep working.")
+                Text(game.config.useSteamClient
+                     ? "This game launches through the Windows Steam client (set in its settings)."
+                     : "Launches natively without the Steam client, using gbe_fork for Steam features.")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 6)
             }
         }
