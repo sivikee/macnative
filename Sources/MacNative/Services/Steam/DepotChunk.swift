@@ -137,7 +137,7 @@ enum Zip {
         r.offset += 8
         let compSize = Int(try r.uint32LE())
         let size = Int(try r.uint32LE())
-        r.offset += 4 + 2 + 2 + 2 + 2 + 4
+        r.offset += 2 + 2 + 2 + 2 + 2 + 4     // name, extra, comment lengths; disk; attributes
         let localOffset = Int(try r.uint32LE())
 
         r.offset = d.startIndex + localOffset

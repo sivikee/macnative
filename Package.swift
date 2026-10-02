@@ -14,6 +14,12 @@ let package = Package(
             dependencies: ["CLzma", "CZstd"],
             path: "Sources/MacNative",
             resources: [.copy("Resources/Fonts"), .copy("Resources/Logo")]
+        ),
+        .testTarget(
+            name: "MacNativeTests",
+            dependencies: ["MacNative"],
+            path: "Tests/MacNativeTests",
+            resources: [.copy("vzip_fixture.hex")]
         )
     ]
 )

@@ -109,7 +109,15 @@ struct ProtoMessage {
     }
 }
 
-enum ProtoError: Error { case truncated, unsupportedWireType }
+enum ProtoError: LocalizedError {
+    case truncated, unsupportedWireType
+    var errorDescription: String? {
+        switch self {
+        case .truncated: "Steam sent data MacNative couldn't read (truncated)"
+        case .unsupportedWireType: "Steam sent data in an unexpected format"
+        }
+    }
+}
 
 /// Little-endian cursor over `Data`, shared by protobuf and Steam's binary formats.
 struct ByteReader {
