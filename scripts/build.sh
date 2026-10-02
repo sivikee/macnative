@@ -2,7 +2,7 @@
 # Builds MacNative.app into ./build.
 #
 #   scripts/build.sh            Dev build. Data (engines, prefixes, downloads) goes to ./data in this repo.
-#   scripts/build.sh --release  Release build. Data goes to ~/Library/Application Support/MacNative.
+#   scripts/build.sh --release  Release build (build/release/). Data goes to ~/Library/Application Support/MacNative.
 #
 # Only needs the Xcode command line tools; nothing is installed on the system.
 set -euo pipefail
@@ -13,7 +13,8 @@ CONFIG="debug"
 if [[ "${1:-}" == "--release" ]]; then MODE="release"; CONFIG="release"; fi
 
 VERSION="0.1.0"
-APP="$ROOT/build/MacNative.app"
+# Release builds go to their own folder so they never replace the dev build (which uses ./data).
+if [[ "$MODE" == "release" ]]; then APP="$ROOT/build/release/MacNative.app"; else APP="$ROOT/build/MacNative.app"; fi
 
 cd "$ROOT"
 swift build -c "$CONFIG" --arch arm64
