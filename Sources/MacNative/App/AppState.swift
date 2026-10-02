@@ -509,6 +509,41 @@ final class AppState {
         }
     }
 
+    // MARK: Erase
+
+    /// Stops everything and deletes all games, prefixes, engines, downloads, accounts and settings.
+    func eraseEverything() async {
+        setActivity("erase", "Erasing", "Stopping games and downloads…", nil)
+        defer { endActivity("erase") }
+
+        for job in jobs.values { job.cancel() }
+        for p in processes.values where p.isRunning { p.terminate() }
+        // Shut down each prefix's wineserver while the engines still exist.
+        let prefixes = (try? FileManager.default.contentsOfDirectory(atPath: Paths.prefixes.path)) ?? []
+        for name in prefixes where !name.hasPrefix(".") {
+            await killPrefix(name, config: settings.defaultConfig)
+        }
+
+        setActivity("erase", "Erasing", "Deleting files…", nil)
+        let items = Paths.ownedItems
+        await Task.detached {
+            for url in items { try? FileManager.default.removeItem(at: url) }
+        }.value
+        URLCache.shared.removeAllCachedResponses()
+
+        processes = [:]
+        running = []
+        steamClientConfig = nil
+        games = []
+        engines.reloadInstalled()
+        isGOGLoggedIn = false
+        route = .library
+        filter = .all
+        focusedIndex = 0
+        settings = AppSettings()
+        showSetup = true
+    }
+
     // MARK: Custom games
 
     func addCustomGame(executable: URL, title: String) {
@@ -611,6 +646,11 @@ enum Format {
     }
 
     static func directorySize(_ url: URL) -> Int64 {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return 0 }
+        if !isDir.boolValue {
+            return Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+        }
         let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey])
         var total: Int64 = 0
         while let f = e?.nextObject() as? URL {

@@ -34,6 +34,13 @@ enum Paths {
     static var cache: URL { dir("cache") }
     static var accounts: URL { dir("accounts") }
 
+    /// Everything MacNative creates under `root`. "Erase everything" deletes exactly these, never
+    /// the root itself, so a custom `MACNATIVE_HOME` pointing at a shared folder stays safe.
+    static var ownedItems: [URL] {
+        ["engines", "components", "prefixes", "downloads", "logs", "cache", "accounts",
+         "library.json", "settings.json"].map { root.appendingPathComponent($0) }
+    }
+
     static var libraryFile: URL { root.appendingPathComponent("library.json") }
     static var settingsFile: URL { root.appendingPathComponent("settings.json") }
 

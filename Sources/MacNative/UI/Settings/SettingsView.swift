@@ -202,6 +202,8 @@ private struct AccountsSection: View {
 
 private struct SystemSection: View {
     @Environment(AppState.self) private var app
+    @State private var confirmErase = false
+    @State private var dataSize: Int64?
 
     var body: some View {
         @Bindable var app = app
@@ -228,6 +230,32 @@ private struct SystemSection: View {
                         subtitle: "Keep the downloaded setup files after installing") {
                 Toggle("", isOn: $app.settings.keepInstallers).toggleStyle(.switch).tint(Theme.primary).labelsHidden()
             }
+        }
+
+        SettingsCard(title: "Danger zone") {
+            SettingsRow(symbol: "trash.fill", tint: Theme.danger, title: "Erase everything",
+                        subtitle: app.activities["erase"]?.detail
+                            ?? "Deletes all games, saves inside prefixes, engines, downloads, accounts and settings"
+                            + (dataSize.map { " (\(Format.bytes($0)))" } ?? "") + ".") {
+                if app.activities["erase"] != nil {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Erase…") { confirmErase = true }
+                        .buttonStyle(PillButtonStyle(color: Theme.danger))
+                }
+            }
+        }
+        .task {
+            let items = Paths.ownedItems
+            dataSize = await Task.detached { items.reduce(0) { $0 + Format.directorySize($1) } }.value
+        }
+        .alert("Erase everything?", isPresented: $confirmErase) {
+            Button("Erase", role: .destructive) {
+                Task { await app.eraseEverything(); dataSize = 0 }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This stops any running games and permanently deletes every installed game, its saves, all Wine engines, downloads, your GOG sign-in and all settings. Steam cloud saves are not affected. This can't be undone.")
         }
 
         SettingsCard(title: "Debug") {
