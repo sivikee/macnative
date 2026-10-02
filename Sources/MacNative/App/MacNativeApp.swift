@@ -24,10 +24,6 @@ struct MacNativeApp: App {
                     input.start()
                     await app.bootstrap()
                 }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    // Pick up games installed/removed in the Steam client while we were in the background.
-                    Task { await app.syncSteam() }
-                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)

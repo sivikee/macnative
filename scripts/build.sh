@@ -23,6 +23,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/MacNative" "$APP/Contents/MacOS/MacNative"
 cp -R "$ROOT/Sources/MacNative/Resources/Fonts" "$APP/Contents/Resources/Fonts"
+cp -R "$ROOT/Sources/MacNative/Resources/Logo" "$APP/Contents/Resources/Logo"
 if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi

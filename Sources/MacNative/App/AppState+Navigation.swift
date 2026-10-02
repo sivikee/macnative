@@ -4,8 +4,8 @@ import Foundation
 extension AppState {
     func handle(_ action: NavAction) -> Bool {
         controllerOrKeyboardActive = true
-        if showSetup || showAddGame || showGOGLogin {
-            if action == .back, !showSetup { showAddGame = false; showGOGLogin = false; return true }
+        if showSetup || showAddGame || showGOGLogin || showSteamLogin {
+            if action == .back, !showSetup { showAddGame = false; showGOGLogin = false; showSteamLogin = false; return true }
             return false
         }
         switch route {

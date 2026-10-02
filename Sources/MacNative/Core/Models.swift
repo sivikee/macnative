@@ -158,5 +158,36 @@ struct GameConfig: Codable, Hashable {
     var dllOverrides = ""
     var environment: [EnvVar] = []
 
+    /// Steam only: launch through the Windows Steam client instead of natively (for heavy DRM/anti-cheat).
+    var useSteamClient = false
+    /// Steam only: strip SteamStub DRM with Steamless before launching (opt-in).
+    var stripSteamStub = false
+
     static let `default` = GameConfig()
+}
+
+extension GameConfig {
+    /// Lenient decoding: fields added in newer versions fall back to their defaults instead of
+    /// failing to load the whole library.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = GameConfig()
+        engineID = try c.decodeIfPresent(String.self, forKey: .engineID)
+        graphics = (try? c.decodeIfPresent(GraphicsBackend.self, forKey: .graphics)) ?? d.graphics
+        windowsVersion = (try? c.decodeIfPresent(WindowsVersion.self, forKey: .windowsVersion)) ?? d.windowsVersion
+        sync = (try? c.decodeIfPresent(SyncMode.self, forKey: .sync)) ?? d.sync
+        retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? d.retinaMode
+        advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? d.advertiseAVX
+        metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? d.metalHUD
+        dxvkHUD = try c.decodeIfPresent(Bool.self, forKey: .dxvkHUD) ?? d.dxvkHUD
+        dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? d.dxvkAsync
+        fpsLimit = try c.decodeIfPresent(Int.self, forKey: .fpsLimit) ?? d.fpsLimit
+        commandAsControl = try c.decodeIfPresent(Bool.self, forKey: .commandAsControl) ?? d.commandAsControl
+        virtualDesktop = try c.decodeIfPresent(String.self, forKey: .virtualDesktop)
+        launchArguments = try c.decodeIfPresent(String.self, forKey: .launchArguments) ?? d.launchArguments
+        dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? d.dllOverrides
+        environment = try c.decodeIfPresent([EnvVar].self, forKey: .environment) ?? d.environment
+        useSteamClient = try c.decodeIfPresent(Bool.self, forKey: .useSteamClient) ?? d.useSteamClient
+        stripSteamStub = try c.decodeIfPresent(Bool.self, forKey: .stripSteamStub) ?? d.stripSteamStub
+    }
 }

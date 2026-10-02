@@ -12,6 +12,20 @@ struct AppSettings: Codable {
     var useImportedD3DMetal = true
 }
 
+extension AppSettings {
+    /// Lenient decoding so new settings never reset existing ones.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        defaultEngineID = try c.decodeIfPresent(String.self, forKey: .defaultEngineID)
+        defaultConfig = try c.decodeIfPresent(GameConfig.self, forKey: .defaultConfig) ?? d.defaultConfig
+        verboseWineLogging = try c.decodeIfPresent(Bool.self, forKey: .verboseWineLogging) ?? d.verboseWineLogging
+        keepInstallers = try c.decodeIfPresent(Bool.self, forKey: .keepInstallers) ?? d.keepInstallers
+        hasCompletedSetup = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedSetup) ?? d.hasCompletedSetup
+        useImportedD3DMetal = try c.decodeIfPresent(Bool.self, forKey: .useImportedD3DMetal) ?? d.useImportedD3DMetal
+    }
+}
+
 /// A long-running job shown in the UI (engine download, game install, …).
 struct Activity: Identifiable, Equatable {
     var id: String
@@ -49,6 +63,7 @@ final class AppState {
     var settings = AppSettings() { didSet { saveSettings() } }
     private(set) var games: [Game] = []
     let engines = EngineManager()
+    let steam = SteamStore()
 
     var route: Route = .library
     var filter: LibraryFilter = .all
@@ -66,6 +81,7 @@ final class AppState {
     var controllerOrKeyboardActive = false
     var showAddGame = false
     var showGOGLogin = false
+    var showSteamLogin = false
     var showSetup = false
 
     private(set) var activities: [String: Activity] = [:]
@@ -196,6 +212,8 @@ final class AppState {
     // MARK: Setup
 
     func bootstrap() async {
+        steam.onLibraryChanged = { [weak self] in self?.mergeSteamLibrary() }
+        mergeSteamLibrary()
         await engines.refreshCatalog()
         await refreshLibraries()
     }
@@ -230,37 +248,32 @@ final class AppState {
     // MARK: Library sync
 
     func refreshLibraries() async {
-        await syncSteam()
+        if steam.isOnline { await steam.sync() } else { await steam.resume() }
         await syncGOG()
     }
 
-    func syncSteam() async {
-        let apps = SteamService.scanLibrary()
-        for app in apps {
-            let id = "steam:\(app.appID)"
+    /// Merges the native Steam library (owned Windows games) into `games`.
+    func mergeSteamLibrary() {
+        let owned = steam.ownedGames
+        let ids = Set(owned.map { "steam:\($0.appID)" })
+        for info in owned {
+            let id = "steam:\(info.appID)"
             if let i = games.firstIndex(where: { $0.id == id }) {
-                games[i].installState = app.installed ? .installed : .notInstalled
-                games[i].installDirectory = app.installDir?.path
-                games[i].installSizeBytes = app.sizeOnDisk
-                if let n = app.name { games[i].title = n }
-            } else if let name = app.name {
-                games.append(newGame(id: id, source: .steam, externalID: app.appID, title: name,
-                                     prefix: SteamService.prefixName) {
-                    $0.installState = app.installed ? .installed : .notInstalled
-                    $0.installDirectory = app.installDir?.path
-                    $0.installSizeBytes = app.sizeOnDisk
-                })
-            } else if let details = await SteamService.storeDetails(app.appID), details.isGame {
-                games.append(newGame(id: id, source: .steam, externalID: app.appID, title: details.name,
-                                     prefix: SteamService.prefixName) {
-                    $0.developer = details.developer
-                    $0.releaseYear = details.year
+                games[i].title = info.name
+                games[i].developer = info.developer ?? games[i].developer
+                games[i].releaseYear = info.releaseYear ?? games[i].releaseYear
+                // Games added by the old client-scan mode shared one prefix; native games get their own.
+                if games[i].prefixName == SteamService.prefixName { games[i].prefixName = "steam-\(info.appID)" }
+            } else {
+                games.append(newGame(id: id, source: .steam, externalID: String(info.appID), title: info.name,
+                                     prefix: "steam-\(info.appID)") {
+                    $0.developer = info.developer
+                    $0.releaseYear = info.releaseYear
                 })
             }
         }
-        // Drop Steam entries that disappeared from the client (e.g. after a reinstall).
-        let known = Set(apps.map { "steam:\($0.appID)" })
-        games.removeAll { $0.source == .steam && !known.contains($0.id) }
+        // Keep installed games even if ownership can't be confirmed right now (offline, family sharing…).
+        games.removeAll { $0.source == .steam && !ids.contains($0.id) && !$0.isInstalled && !$0.config.useSteamClient }
         saveLibrary()
     }
 
@@ -451,7 +464,6 @@ final class AppState {
                 Task { @MainActor in
                     self?.processes["steam-client"] = nil
                     self?.steamClientConfig = nil
-                    await self?.syncSteam()
                 }
             }
         } else if !arguments.isEmpty {
@@ -465,8 +477,10 @@ final class AppState {
 
     func install(_ game: Game) async {
         switch game.source {
+        case .steam where game.config.useSteamClient:
+            do { try await openSteam(arguments: ["steam://install/\(game.externalID)"], config: game.config) } catch { report(error) }
         case .steam:
-            do { try await openSteam(arguments: ["steam://install/\(game.externalID)"]) } catch { report(error) }
+            toast = "Native Steam downloads are being built right now — coming in the next update."
         case .gog:
             startJob(game.id) { [weak self] in await self?.installGOG(game) }
         case .custom:
@@ -489,7 +503,15 @@ final class AppState {
                 let real = try await GOGService.resolveDownlink(file.downlink)
                 let base = done
                 let part = "Downloading part \(n + 1) of \(files.count)"
-                let local = try await Downloader.download(real, into: dir, fileName: real.lastPathComponent.removingPercentEncoding) {
+                let name = real.lastPathComponent.removingPercentEncoding ?? real.lastPathComponent
+                // Reuse parts kept from an earlier attempt (GOG's listed sizes are slightly rounded down).
+                let existing = dir.appendingPathComponent(name)
+                if let size = (try? existing.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, Int64(size) >= file.size {
+                    done += file.size
+                    downloaded.append(existing)
+                    continue
+                }
+                let local = try await Downloader.download(real, into: dir, fileName: name) {
                     [weak self] received, _ in
                     let p = total > 0 ? Double(base + received) / Double(total) : nil
                     let text = "\(part) · \(Format.bytes(base + received)) of \(Format.bytes(total))"
@@ -505,19 +527,35 @@ final class AppState {
             try Task.checkCancellation()
             setActivity(id, game.title, "Installing…", nil)
             installerStarted = true
-            let ctx = try await preparedContext(for: game)
             let folder = Format.safeFolderName(game.title)
-            let installDir = ctx.prefix.appendingPathComponent("drive_c/Games/\(folder)", isDirectory: true)
-            try await WineRunner.runToCompletion(ctx, executable: setup.path, arguments: [
-                "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOICONS",
-                "/DIR=C:\\Games\\\(folder)",
-            ], log: Paths.logs.appendingPathComponent("install-\(game.externalID).log"))
+            let installDir = Paths.prefixes.appendingPathComponent("\(game.prefixName)/drive_c/Games/\(folder)", isDirectory: true)
+
+            var task: GOGService.PlayTask?
+            do {
+                let ctx = try await preparedContext(for: game)
+                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game)
+                task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID)
+                if task == nil { throw GOGService.GOGError.noExecutable }
+            } catch where !Self.isCancellation(error) {
+                // Some GOG installers (32-bit Inno Setup with custom UI) crash under new Wine on macOS.
+                // Retry once in a fresh prefix with the Game Porting Toolkit Wine, which handles them.
+                // The game itself still runs on the engine chosen in its settings.
+                setActivity(id, game.title, "Installer failed, retrying with the compatibility engine…", nil)
+                await killPrefix(game.prefixName, config: game.config)
+                try? FileManager.default.removeItem(at: Paths.prefixes.appendingPathComponent(game.prefixName))
+                var compat = game.config
+                compat.graphics = .d3dmetal
+                try await ensureD3DMetalEngine(compat, activityID: id, title: game.title)
+                setActivity(id, game.title, "Installing (compatibility mode)…", nil)
+                let ctx = try await context(prefix: game.prefixName, config: compat)
+                try await WineRunner.preparePrefix(ctx)
+                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game)
+                task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID)
+            }
 
             if !settings.keepInstallers { try? FileManager.default.removeItem(at: dir) }
 
-            guard let task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID) else {
-                throw GOGService.GOGError.noExecutable
-            }
+            guard let task else { throw GOGService.GOGError.noExecutable }
             let exe = installDir.appendingPathComponent(task.path.replacingOccurrences(of: "\\", with: "/"))
             let work = task.workingDir.map { installDir.appendingPathComponent($0.replacingOccurrences(of: "\\", with: "/")) }
             update(game.id) {
@@ -539,6 +577,20 @@ final class AppState {
             }
             report(error)
         }
+    }
+
+    /// Runs a GOG Inno Setup installer silently, keeping both our log and Inno's own log.
+    private func runGOGInstaller(_ ctx: WineContext, setup: URL, folder: String, game: Game) async throws {
+        let innoLog = ctx.prefix.appendingPathComponent("drive_c/macnative-install.log")
+        defer {
+            let dest = Paths.logs.appendingPathComponent("install-\(game.externalID)-setup.log")
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.copyItem(at: innoLog, to: dest)
+        }
+        try await WineRunner.runToCompletion(ctx, executable: setup.path, arguments: [
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOICONS",
+            "/DIR=C:\\Games\\\(folder)", "/LOG=C:\\macnative-install.log",
+        ], log: Paths.logs.appendingPathComponent("install-\(game.externalID).log"))
     }
 
     func uninstall(_ game: Game) async {
@@ -631,7 +683,7 @@ final class AppState {
         setActivity(id, game.title, "Preparing…", nil)
         do {
             try await ensureD3DMetalEngine(game.config, activityID: id, title: game.title)
-            if game.source == .steam {
+            if game.source == .steam, game.config.useSteamClient {
                 try await openSteam(arguments: ["-applaunch", game.externalID], config: game.config)
                 endActivity(id)
                 update(id) { $0.lastPlayed = .now }
@@ -668,10 +720,26 @@ final class AppState {
         await WineRunner.kill(ctx)
     }
 
+    /// Opens the newest log for this game (run, install, or installer's own log).
     func openLog(_ game: Game) {
-        let name = game.source == .steam ? "steam.log" : "\(game.prefixName).log"
-        let url = Paths.logs.appendingPathComponent(name)
-        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.open(url) }
+        let names = game.source == .steam
+            ? ["steam.log", "\(game.prefixName).log"]
+            : ["\(game.prefixName).log", "install-\(game.externalID).log", "install-\(game.externalID)-setup.log"]
+        let newest = names.map { Paths.logs.appendingPathComponent($0) }
+            .compactMap { url -> (URL, Date)? in
+                guard let d = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                else { return nil }
+                return (url, d)
+            }
+            .max { $0.1 < $1.1 }?.0
+        if let newest {
+            // Open in TextEdit explicitly: .log files may have no default app, which silently does nothing.
+            let textEdit = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
+            NSWorkspace.shared.open([newest], withApplicationAt: textEdit, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            toast = "No log yet for \(game.title). Logs appear after the first install or launch."
+            NSWorkspace.shared.open(Paths.logs)
+        }
     }
 
     func revealPrefix(_ game: Game) {

@@ -142,8 +142,14 @@ enum WineRunner {
     /// Runs a Windows program to completion (used for installers).
     static func runToCompletion(_ ctx: WineContext, executable: String, arguments: [String],
                                 log: URL? = nil) async throws {
-        let output = try await Shell.run(ctx.wineBinary.path, [executable] + arguments, environment: ctx.environment)
-        if let log { try? output.write(to: log, atomically: true, encoding: .utf8) }
+        do {
+            let output = try await Shell.run(ctx.wineBinary.path, [executable] + arguments, environment: ctx.environment)
+            if let log { try? output.write(to: log, atomically: true, encoding: .utf8) }
+        } catch let ShellError.failed(command, status, output) {
+            // Keep the output of failed runs too: that's when the log matters most.
+            if let log { try? "\(command)\nexit status \(status)\n\n\(output)".write(to: log, atomically: true, encoding: .utf8) }
+            throw ShellError.failed(command: command, status: status, output: output)
+        }
         try await waitForWineserver(ctx)
     }
 

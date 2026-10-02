@@ -10,6 +10,10 @@ struct SetupView: View {
         let engineActivity = app.activities["engine:\(recommended.id)"]
 
         VStack(alignment: .leading, spacing: 20) {
+            if let mark = Theme.logoMark {
+                Image(nsImage: mark).resizable().interpolation(.high).frame(width: 64, height: 64)
+                    .shadow(color: Theme.primary.opacity(0.5), radius: 16)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Welcome to MacNative").font(Theme.font(32, .bold))
                     .foregroundStyle(Theme.brandGradient)
@@ -28,12 +32,11 @@ struct SetupView: View {
             }
 
             step(3, "Connect your stores", "Optional — you can do this later in Settings → Accounts.",
-                 done: app.isGOGLoggedIn || SteamService.isClientInstalled, activity: app.activities["steam-client"], jobID: "steam-client") {
+                 done: app.isGOGLoggedIn || app.steam.isLoggedIn, activity: nil, jobID: "") {
                 HStack {
                     Button("GOG") { app.showGOGLogin = true }.buttonStyle(PillButtonStyle(color: Theme.purple))
-                    Button("Steam") { app.installSteamClient() }
+                    Button("Steam") { app.showSteamLogin = true }
                         .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
-                        .disabled(!engineReady || !app.rosettaInstalled)
                 }
             }
 

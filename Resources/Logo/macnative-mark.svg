@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="182 165 660 660">
+  <!-- MacNative mark (glyph only, transparent). Same geometry as macnative-icon.svg. -->
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="230" y1="380" x2="794" y2="660">
+      <stop offset="0" stop-color="#00D4FF"/>
+      <stop offset="0.5" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#EC4899"/>
+    </linearGradient>
+    <linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="512" y1="262" x2="512" y2="718">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="facet" gradientUnits="userSpaceOnUse" x1="512" y1="540" x2="512" y2="718">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.92"/>
+      <stop offset="0.55" stop-color="#F5C2FB"/>
+      <stop offset="1" stop-color="#E879F9"/>
+    </linearGradient>
+    <clipPath id="baseline"><rect x="0" y="0" width="1024" height="718"/></clipPath>
+  </defs>
+  <g clip-path="url(#baseline)">
+    <!-- the M: two peaks (round joins), clipped flat at the baseline -->
+    <g fill="none" stroke-width="108" stroke-linejoin="round" stroke-linecap="butt">
+      <polyline points="249.464,798 393,330 536.536,798" stroke="url(#brand)"/>
+      <polyline points="487.464,798 631,330 774.536,798" stroke="url(#brand)"/>
+      <!-- glass sheen from the top -->
+      <polyline points="249.464,798 393,330 536.536,798" stroke="url(#sheen)"/>
+      <polyline points="487.464,798 631,330 774.536,798" stroke="url(#sheen)"/>
+    </g>
+    <!-- where the peaks meet: the bright "merge" facet -->
+    <polygon points="455.517,718 512,533.838 568.483,718" fill="url(#facet)"/>
+  </g>
+</svg>

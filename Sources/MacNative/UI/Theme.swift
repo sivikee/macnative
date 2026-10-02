@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreText
+import AppKit
 
 /// Visual language ported from GameNative (dark zinc base, magenta primary, cyan tertiary,
 /// Bricolage Grotesque). Values mirror GameNative's `ui/theme/Color.kt`.
@@ -44,13 +45,19 @@ enum Theme {
         return .custom(name, size: size)
     }
 
+    /// Packaged app: Contents/Resources/<folder>. `swift run`: SwiftPM's resource bundle.
+    static func resourceFolder(_ name: String) -> URL? {
+        let packaged = Bundle.main.resourceURL?.appendingPathComponent(name)
+        return packaged.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            ?? Bundle.module.url(forResource: name, withExtension: nil)
+    }
+
+    static let logoMark: NSImage? = resourceFolder("Logo")
+        .flatMap { NSImage(contentsOf: $0.appendingPathComponent("macnative-mark-256.png")) }
+
     /// Registers the bundled fonts for this process only (nothing is installed system-wide).
     static func registerFonts() {
-        // Packaged app: Contents/Resources/Fonts. `swift run`: SwiftPM's resource bundle.
-        let packaged = Bundle.main.resourceURL?.appendingPathComponent("Fonts")
-        let dir = packaged.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
-            ?? Bundle.module.url(forResource: "Fonts", withExtension: nil)
-        guard let dir,
+        guard let dir = resourceFolder("Fonts"),
               let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         else { return }
         for url in files where url.pathExtension == "ttf" {

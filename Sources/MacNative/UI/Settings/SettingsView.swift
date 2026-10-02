@@ -225,24 +225,37 @@ private struct AccountsSection: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
-        SettingsCard(title: "Steam", subtitle: "Runs the official Windows Steam client in its own prefix") {
-            let activity = app.activities["steam-client"]
+        SettingsCard(title: "Steam", subtitle: "Signs in to Steam directly — no Steam client needed") {
+            let steam = app.steam
             SettingsRow(symbol: "cloud.fill", tint: Theme.statusAvailable,
-                        title: SteamService.isClientInstalled ? "Steam client installed" : "Steam client not installed",
+                        title: steam.account.map { "Signed in as \($0.accountName)" } ?? "Not signed in",
+                        subtitle: steam.account == nil
+                            ? "Sign in with your Steam account or the Steam mobile app's QR scanner."
+                            : steam.isSyncing ? "Syncing your library…"
+                            : "\(steam.ownedGames.count) Windows games · \(steam.isOnline ? "online" : "offline")") {
+                if steam.account != nil {
+                    if steam.isSyncing { ProgressView().controlSize(.small) }
+                    Button("Sync") { Task { await app.refreshLibraries() } }
+                        .buttonStyle(PillButtonStyle(prominent: false)).disabled(steam.isSyncing)
+                    Button("Sign out") { steam.logout() }.buttonStyle(PillButtonStyle(color: Theme.destructive))
+                } else {
+                    Button("Sign in") { app.showSteamLogin = true }.buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
+                }
+            }
+            let activity = app.activities["steam-client"]
+            SettingsRow(symbol: "macwindow", tint: Theme.muted,
+                        title: "Windows Steam client (fallback)",
                         subtitle: activity?.detail ?? (SteamService.isClientInstalled
-                            ? "Sign in inside Steam once; installed and owned games appear in your library."
-                            : "Downloads the official installer from Valve (~2 MB, then Steam updates itself).")) {
+                            ? "Installed. Used only by games with “Use Steam client” turned on."
+                            : "Optional. For games with heavy DRM or anti-cheat; enable per game.")) {
                 if let activity {
                     GradientProgressBar(progress: activity.progress).frame(width: 140)
                     CancelJobButton(jobID: "steam-client")
                 } else if SteamService.isClientInstalled {
-                    Button("Open Steam") { Task { do { try await app.openSteam(arguments: []) } catch { app.report(error) } } }
-                        .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
-                    Button("Rescan") { Task { await app.syncSteam() } }
+                    Button("Open") { Task { do { try await app.openSteam(arguments: []) } catch { app.report(error) } } }
                         .buttonStyle(PillButtonStyle(prominent: false))
                 } else {
-                    Button("Set up Steam") { app.installSteamClient() }
-                        .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
+                    Button("Install") { app.installSteamClient() }.buttonStyle(PillButtonStyle(prominent: false))
                 }
             }
         }

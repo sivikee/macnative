@@ -60,14 +60,9 @@ struct LibraryView: View {
                 if app.filter == .gog || (app.filter == .all && !app.isGOGLoggedIn) {
                     Button("Sign in to GOG") { app.showGOGLogin = true }.buttonStyle(PillButtonStyle())
                 }
-                if app.filter == .steam || (app.filter == .all && !SteamService.isClientInstalled) {
-                    Button(SteamService.isClientInstalled ? "Open Steam" : "Set up Steam") {
-                        Task {
-                            if SteamService.isClientInstalled { try? await app.openSteam(arguments: []) }
-                            else { app.installSteamClient() }
-                        }
-                    }
-                    .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
+                if !app.steam.isLoggedIn, app.filter == .steam || app.filter == .all {
+                    Button("Sign in to Steam") { app.showSteamLogin = true }
+                        .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
                 }
             }
             .padding(.top, 6)
@@ -90,7 +85,7 @@ struct LibraryView: View {
         if !app.search.isEmpty { return "Nothing in this view matches “\(app.search)”." }
         switch app.filter {
         case .favorites: return "Press X / Square or F on a game to favorite it."
-        case .steam: return "MacNative runs the Windows Steam client in its own prefix. Sign in there once and your games show up here."
+        case .steam: return app.steam.isLoggedIn ? "No Windows games found on this Steam account yet." : "Sign in to Steam to see your games. No Steam client needed."
         case .gog: return "Sign in with your GOG account to see your games. They install with no client needed."
         case .custom: return "Add any Windows .exe with the + button."
         default: return "Connect Steam or GOG, or add a Windows game yourself."

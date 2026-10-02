@@ -24,6 +24,7 @@ struct RootView: View {
         .overlay(alignment: .bottom) { toast }
         .sheet(isPresented: $app.showAddGame) { AddGameSheet() }
         .sheet(isPresented: $app.showGOGLogin) { GOGLoginView() }
+        .sheet(isPresented: $app.showSteamLogin) { SteamLoginView() }
         .font(Theme.font(14))
         .foregroundStyle(Theme.foreground)
         .tint(Theme.primary)

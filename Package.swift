@@ -8,7 +8,7 @@ let package = Package(
         .executableTarget(
             name: "MacNative",
             path: "Sources/MacNative",
-            resources: [.copy("Resources/Fonts")]
+            resources: [.copy("Resources/Fonts"), .copy("Resources/Logo")]
         )
     ]
 )
