@@ -12,6 +12,11 @@ No bottles to manage, no Wine config files, no Steam client required.
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native-A21CAF?style=flat-square)
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-F05138?style=flat-square&logo=swift&logoColor=white)
+[![Release](https://img.shields.io/github/v/release/sivikee/macnative?include_prereleases&style=flat-square&label=release)](https://github.com/sivikee/macnative/releases)
+
+### [⬇️ Download MacNative for macOS](https://github.com/sivikee/macnative/releases)
+
+<sub>Apple Silicon · macOS 14+ · free & open source</sub>
 
 </div>
 
@@ -94,7 +99,19 @@ Proton is Valve's bundle of Wine, DXVK and VKD3D-Proton for **Linux**, and its b
 
 ## Getting started
 
-**Requirements:** an Apple Silicon Mac, macOS 14 or newer, and the Xcode command line tools to build.
+### Download (recommended)
+
+1. Grab **MacNative-x.y.z-macOS-arm64.zip** from [**Releases**](https://github.com/sivikee/macnative/releases), unzip it, and move **MacNative.app** to Applications.
+2. Builds are ad-hoc signed and not notarized yet, so macOS asks once:
+   - **macOS 15 and newer:** open the app, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+   - **macOS 14:** right-click the app and choose **Open**.
+3. Follow the first-run checklist. MacNative checks GitHub for new versions on launch and updates itself in one click.
+
+**Requirements:** an Apple Silicon Mac with macOS 14 or newer.
+
+### Build from source
+
+You also need the Xcode command line tools.
 
 ```sh
 git clone https://github.com/sivikee/macnative.git
