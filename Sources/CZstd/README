@@ -1,0 +1,2 @@
+zstd single-file decoder, generated from https://github.com/facebook/zstd (build/single_file_libs/combine.py).
+Licensed under the BSD license in LICENSE.

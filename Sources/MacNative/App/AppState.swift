@@ -264,12 +264,19 @@ final class AppState {
                 games[i].releaseYear = info.releaseYear ?? games[i].releaseYear
                 // Games added by the old client-scan mode shared one prefix; native games get their own.
                 if games[i].prefixName == SteamService.prefixName { games[i].prefixName = "steam-\(info.appID)" }
+                if let record = SteamInstaller.record(info.appID) {
+                    applySteamInstall(&games[i], app: info, record: record)
+                } else if !games[i].config.useSteamClient {
+                    games[i].installState = .notInstalled
+                }
             } else {
-                games.append(newGame(id: id, source: .steam, externalID: String(info.appID), title: info.name,
-                                     prefix: "steam-\(info.appID)") {
+                var g = newGame(id: id, source: .steam, externalID: String(info.appID), title: info.name,
+                                prefix: "steam-\(info.appID)") {
                     $0.developer = info.developer
                     $0.releaseYear = info.releaseYear
-                })
+                }
+                if let record = SteamInstaller.record(info.appID) { applySteamInstall(&g, app: info, record: record) }
+                games.append(g)
             }
         }
         // Keep installed games even if ownership can't be confirmed right now (offline, family sharing…).
@@ -480,7 +487,7 @@ final class AppState {
         case .steam where game.config.useSteamClient:
             do { try await openSteam(arguments: ["steam://install/\(game.externalID)"], config: game.config) } catch { report(error) }
         case .steam:
-            toast = "Native Steam downloads are being built right now — coming in the next update."
+            startJob(game.id) { [weak self] in await self?.installSteam(game) }
         case .gog:
             startJob(game.id) { [weak self] in await self?.installGOG(game) }
         case .custom:
@@ -579,6 +586,44 @@ final class AppState {
         }
     }
 
+    /// Downloads a Steam game natively from Steam's CDN. Cancelling keeps finished files for resume.
+    private func installSteam(_ game: Game) async {
+        let id = game.id
+        setActivity(id, game.title, "Connecting to Steam…", nil)
+        defer { endActivity(id) }
+        do {
+            try await steam.ensureOnline()
+            guard let appID = UInt32(game.externalID), let app = steam.apps[appID], let owned = steam.ownership else {
+                throw SteamError(message: "Steam hasn't sent details for \(game.title) yet. Try Sync in Settings → Accounts.")
+            }
+            let title = game.title
+            let record = try await SteamInstaller.install(app, ownership: owned, steam: steam.session) { [weak self] p in
+                let fraction = p.total > 0 ? Double(p.done) / Double(p.total) : nil
+                let text = p.total > 0 ? "\(p.phase) · \(Format.bytes(p.done)) of \(Format.bytes(p.total))" : p.phase
+                Task { @MainActor in self?.updateProgress(id, title, text, fraction) }
+            }
+            update(id) { self.applySteamInstall(&$0, app: app, record: record) }
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Fills install fields of a Steam game from its install record and PICS launch options.
+    func applySteamInstall(_ g: inout Game, app: SteamAppInfo, record: SteamInstallRecord) {
+        g.installState = .installed
+        g.installDirectory = record.installDir
+        g.installSizeBytes = record.sizeOnDisk
+        let dir = URL(fileURLWithPath: record.installDir)
+        if let launch = app.windowsLaunchOptions.first {
+            let exe = dir.appendingPathComponent(launch.executable.replacingOccurrences(of: "\\", with: "/"))
+            g.executablePath = exe.path
+            g.workingDirectory = launch.workingDir.flatMap { $0.isEmpty ? nil : $0 }
+                .map { dir.appendingPathComponent($0.replacingOccurrences(of: "\\", with: "/")).path }
+                ?? exe.deletingLastPathComponent().path
+            g.steamLaunchArguments = launch.arguments
+        }
+    }
+
     /// Runs a GOG Inno Setup installer silently, keeping both our log and Inno's own log.
     private func runGOGInstaller(_ ctx: WineContext, setup: URL, folder: String, game: Game) async throws {
         let innoLog = ctx.prefix.appendingPathComponent("drive_c/macnative-install.log")
@@ -595,8 +640,16 @@ final class AppState {
 
     func uninstall(_ game: Game) async {
         switch game.source {
+        case .steam where game.config.useSteamClient:
+            do { try await openSteam(arguments: ["steam://uninstall/\(game.externalID)"], config: game.config) } catch { report(error) }
         case .steam:
-            do { try await openSteam(arguments: ["steam://uninstall/\(game.externalID)"]) } catch { report(error) }
+            if let appID = UInt32(game.externalID) { SteamInstaller.uninstall(appID) }
+            update(game.id) {
+                $0.installState = .notInstalled
+                $0.executablePath = nil
+                $0.installDirectory = nil
+                $0.installSizeBytes = nil
+            }
         case .gog:
             // Each GOG game owns its prefix, so removing the prefix removes the game completely.
             try? FileManager.default.removeItem(at: Paths.prefixes.appendingPathComponent(game.prefixName))

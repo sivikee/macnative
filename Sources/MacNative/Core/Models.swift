@@ -45,6 +45,9 @@ struct Game: Identifiable, Codable, Hashable {
     var installDirectory: String?
     var installSizeBytes: Int64?
 
+    /// Steam: arguments from the app's launch option (in addition to the user's own).
+    var steamLaunchArguments: String?
+
     var isFavorite = false
     var lastPlayed: Date?
     var playTimeSeconds: Double = 0
