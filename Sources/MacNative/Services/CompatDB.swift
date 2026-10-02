@@ -85,7 +85,7 @@ enum JSONValue: Codable, Hashable {
 @MainActor
 @Observable
 final class CompatDB {
-    static let remoteURL = URL(string: "https://raw.githubusercontent.com/sivikee/macnative/main/compat/games.json")!
+    static let remoteURL = URL(string: "https://raw.githubusercontent.com/sivikee/macnative/refs/heads/main/compat/games.json")!
     static let issueURL = "https://github.com/sivikee/macnative/issues/new"
 
     private(set) var entries: [String: CompatEntry] = [:]
