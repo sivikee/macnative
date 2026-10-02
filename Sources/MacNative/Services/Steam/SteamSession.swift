@@ -69,6 +69,7 @@ actor SteamSession {
                         w.string(6, "english")
                         w.int32(7, 0)
                         w.bool(8, true)
+                        w.string(50, account.accountName)   // required alongside the token
                         w.string(96, SteamAuth.deviceName)
                         w.bool(102, true)
                         w.string(108, account.refreshToken)
