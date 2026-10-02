@@ -12,7 +12,7 @@ MODE="dev"
 CONFIG="debug"
 if [[ "${1:-}" == "--release" ]]; then MODE="release"; CONFIG="release"; fi
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 # Release builds go to their own folder so they never replace the dev build (which uses ./data).
 if [[ "$MODE" == "release" ]]; then APP="$ROOT/build/release/MacNative.app"; else APP="$ROOT/build/MacNative.app"; fi
 

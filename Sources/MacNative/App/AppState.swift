@@ -641,10 +641,11 @@ final class AppState {
                 var compat = game.config
                 compat.graphics = .d3dmetal
                 try await ensureD3DMetalEngine(compat, activityID: id, title: game.title)
-                setActivity(id, game.title, "Installing (compatibility mode)…", nil)
+                setActivity(id, game.title, "Installing — follow the installer window (accept the license)…", nil)
                 let ctx = try await context(prefix: game.prefixName, config: compat)
                 try await WineRunner.preparePrefix(ctx)
-                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game)
+                // Installers with a EULA page can't be accepted silently, so show the wizard here.
+                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game, interactive: true)
                 task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID)
             }
 
@@ -726,7 +727,8 @@ final class AppState {
     }
 
     /// Runs a GOG Inno Setup installer silently, keeping both our log and Inno's own log.
-    private func runGOGInstaller(_ ctx: WineContext, setup: URL, folder: String, game: Game) async throws {
+    private func runGOGInstaller(_ ctx: WineContext, setup: URL, folder: String, game: Game,
+                                 interactive: Bool = false) async throws {
         let innoLog = ctx.prefix.appendingPathComponent("drive_c/macnative-install.log")
         defer {
             let dest = Paths.logs.appendingPathComponent("install-\(game.externalID)-setup.log")
@@ -734,9 +736,9 @@ final class AppState {
             try? FileManager.default.copyItem(at: innoLog, to: dest)
         }
         try await WineRunner.runToCompletion(ctx, executable: setup.path, arguments: [
-            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOICONS",
+            "/NORESTART", "/NOICONS",
             "/DIR=C:\\Games\\\(folder)", "/LOG=C:\\macnative-install.log",
-        ], log: Paths.logs.appendingPathComponent("install-\(game.externalID).log"))
+        ] + (interactive ? [] : ["/SILENT"]), log: Paths.logs.appendingPathComponent("install-\(game.externalID).log"))
     }
 
     func uninstall(_ game: Game) async {
