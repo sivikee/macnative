@@ -102,6 +102,36 @@ struct CancelJobButton: View {
     }
 }
 
+/// Compatibility status pill (GameNative `CompatibilityBadge` colours).
+struct CompatibilityBadge: View {
+    var status: CompatEntry.Status
+    var showsLabel = false
+
+    private var style: (symbol: String, label: String, fg: Color, bg: Color) {
+        switch status {
+        case .works: ("checkmark", "Works", Color(hex: 0x4CAF50), Color(hex: 0x1B5E20))
+        case .playable: ("checkmark", "Playable", Color(hex: 0x8BC34A), Color(hex: 0x33691E))
+        case .broken: ("xmark", "Broken", Color(hex: 0xEF5350), Color(hex: 0xB71C1C))
+        case .unknown: ("questionmark", "Unknown", Color(hex: 0x9E9E9E), Color(hex: 0x424242))
+        }
+    }
+
+    var body: some View {
+        let s = style
+        HStack(spacing: 4) {
+            Image(systemName: s.symbol).font(.system(size: showsLabel ? 12 : 11, weight: .bold))
+            if showsLabel { Text(s.label).font(Theme.font(12, .semibold)) }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, showsLabel ? 10 : 0).padding(.vertical, showsLabel ? 5 : 0)
+        .frame(width: showsLabel ? nil : 24, height: showsLabel ? nil : 24)
+        .background(Capsule().fill(s.bg.opacity(0.9)))
+        .overlay(Capsule().strokeBorder(s.fg.opacity(0.6), lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 4)
+        .help("Compatibility: \(s.label)")
+    }
+}
+
 /// Small label/value tile on the game page (GameNative `InfoCard`).
 struct InfoCard: View {
     var label: String

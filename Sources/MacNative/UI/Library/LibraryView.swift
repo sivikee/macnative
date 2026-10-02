@@ -22,7 +22,8 @@ struct LibraryView: View {
                                 GameCard(game: game,
                                          focused: index == app.focusedIndex && app.controllerOrKeyboardActive,
                                          activity: app.activities[game.id],
-                                         running: app.isRunning(game))
+                                         running: app.isRunning(game),
+                                         compat: app.compat.entry(for: game)?.status)
                                     .id(game.id)
                                     .onTapGesture {
                                         app.focusedIndex = index

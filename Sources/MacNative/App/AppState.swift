@@ -67,6 +67,7 @@ final class AppState {
     private(set) var games: [Game] = []
     let engines = EngineManager()
     let steam = SteamStore()
+    let compat = CompatDB()
 
     var route: Route = .library
     var filter: LibraryFilter = .all
@@ -217,8 +218,49 @@ final class AppState {
     func bootstrap() async {
         steam.onLibraryChanged = { [weak self] in self?.mergeSteamLibrary() }
         mergeSteamLibrary()
+        applyCompatConfigs()
+        await compat.refresh()
+        applyCompatConfigs()
         await engines.refreshCatalog()
         await refreshLibraries()
+    }
+
+    /// Applies known-good settings from the compatibility database to games the player hasn't customized.
+    func applyCompatConfigs() {
+        var changed = false
+        for i in games.indices {
+            guard games[i].configCustomized != true, let entry = compat.entry(for: games[i]),
+                  games[i].compatRevision != entry.revision else { continue }
+            // Settings changed before customization was tracked count as the player's choice.
+            guard games[i].compatRevision != nil || games[i].config == settings.defaultConfig else { continue }
+            games[i].config = entry.apply(to: settings.defaultConfig)
+            games[i].compatRevision = entry.revision
+            changed = true
+        }
+        if changed { saveLibrary() }
+    }
+
+    /// Opens a pre-filled GitHub compatibility report for a game.
+    func reportCompatibility(_ game: Game) {
+        let c = game.config
+        let engine = engineDescription(for: c)
+        let settingsText = "Graphics: \(c.graphics.displayName)\nEngine: \(engine)\nWindows: \(c.windowsVersion.displayName)"
+            + (c.launchArguments.isEmpty ? "" : "\nArguments: \(c.launchArguments)")
+            + (c.useSteamClient ? "\nSteam client mode: on" : "")
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        var model = [CChar](repeating: 0, count: 64)
+        var size = model.count
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        let system = "MacNative \(version), \(String(cString: model)), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        var c2 = URLComponents(string: CompatDB.issueURL)!
+        c2.queryItems = [
+            .init(name: "template", value: "compatibility.yml"),
+            .init(name: "title", value: "[Compat] \(game.title)"),
+            .init(name: "game", value: "\(game.title) (\(game.source.rawValue) \(game.externalID))"),
+            .init(name: "settings", value: settingsText),
+            .init(name: "system", value: system),
+        ]
+        if let url = c2.url { NSWorkspace.shared.open(url) }
     }
 
     func installRosetta() async {
@@ -285,6 +327,7 @@ final class AppState {
         // Keep installed games even if ownership can't be confirmed right now (offline, family sharing…).
         games.removeAll { $0.source == .steam && !ids.contains($0.id) && !$0.isInstalled && !$0.config.useSteamClient }
         saveLibrary()
+        applyCompatConfigs()
     }
 
     func syncGOG() async {
@@ -296,6 +339,7 @@ final class AppState {
                                      prefix: "gog-\(o.id)") { $0.heroURL = o.heroURL })
             }
             saveLibrary()
+            applyCompatConfigs()
             for g in games where g.source == .gog && g.coverURL == nil {
                 if let meta = await GOGService.metadata(gameID: g.externalID) {
                     update(g.id) {

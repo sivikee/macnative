@@ -62,6 +62,9 @@ Every game has simple settings, modelled on GameNative's container settings:
 
 There are no config files to edit.
 
+### ✅ Compatibility database
+[`compat/games.json`](compat/games.json) is a community-maintained list of how games run: **Works / Playable / Broken**, with notes and known-good settings. MacNative downloads the latest version, shows a badge on each game, and applies recommended settings automatically unless you've changed that game's settings. Use game page → ⋯ → **Report compatibility…** to open a pre-filled report, or edit the file in a pull request (see [compat/README.md](compat/README.md)).
+
 ### 📦 Self-contained
 Everything MacNative creates lives in **one folder**: engines, game prefixes, downloads, Steam libraries, logs, caches and sign-ins. Nothing is installed system-wide. The only exception is Apple's Rosetta 2, which MacNative offers to install through macOS's own installer. **Settings → System → Erase everything** removes it all in one click.
 
@@ -127,7 +130,7 @@ Set `MACNATIVE_HOME=/some/folder` to put the data folder anywhere you like.
 - [ ] Steam achievement sync
 - [ ] Steam game updates, beta branches, file verification, shared redistributables
 - [ ] GOG cloud saves; downloading GOG games through Galaxy's content system instead of installers
-- [ ] Known-good per-game configs applied automatically
+- [x] Compatibility database: per-game status badges and known-good configs applied automatically
 - [ ] Controller navigation inside settings screens
 - [ ] Epic Games
 - [ ] Signed and notarized releases with auto-update

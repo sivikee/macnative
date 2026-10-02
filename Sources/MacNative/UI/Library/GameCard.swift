@@ -7,6 +7,7 @@ struct GameCard: View {
     var focused: Bool
     var activity: Activity?
     var running: Bool
+    var compat: CompatEntry.Status?
     @State private var hover = false
 
     var body: some View {
@@ -52,7 +53,11 @@ struct GameCard: View {
                 .padding(10)
         }
         .overlay(alignment: .topLeading) {
-            if game.isFavorite { OverlayPill(symbol: "heart.fill", tint: Theme.pink).padding(8) }
+            HStack(spacing: 6) {
+                if let compat { CompatibilityBadge(status: compat) }
+                if game.isFavorite { OverlayPill(symbol: "heart.fill", tint: Theme.pink) }
+            }
+            .padding(8)
         }
         .aspectRatio(2 / 3, contentMode: .fit)
         .clipShape(shape)

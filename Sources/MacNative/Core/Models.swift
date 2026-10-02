@@ -47,6 +47,10 @@ struct Game: Identifiable, Codable, Hashable {
 
     /// Steam: arguments from the app's launch option (in addition to the user's own).
     var steamLaunchArguments: String?
+    /// The player changed this game's settings; compatibility-database configs no longer apply.
+    var configCustomized: Bool?
+    /// Revision of the compatibility-database entry whose config was applied.
+    var compatRevision: Int?
 
     var isFavorite = false
     var lastPlayed: Date?

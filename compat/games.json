@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "games": [
+    {
+      "store": "steam",
+      "id": "550",
+      "title": "Left 4 Dead 2",
+      "status": "works",
+      "revision": 1,
+      "notes": "32-bit DirectX 9. Runs natively (no Steam client) with WineD3D.",
+      "testedWith": "MacNative 0.1.0, Wine Staging 11.18, M2 Pro, macOS 27",
+      "config": { "graphics": "wined3d" }
+    },
+    {
+      "store": "steam",
+      "id": "288470",
+      "title": "Fable Anniversary",
+      "status": "broken",
+      "revision": 1,
+      "notes": "Hangs before the window opens: the executable is mixed-mode .NET, which wine-mono can't run under Wine 11's 32-bit mode. Needs a real .NET Framework (planned).",
+      "testedWith": "MacNative 0.1.0, Wine Staging 11.18, M2 Pro, macOS 27",
+      "config": { "graphics": "wined3d" }
+    },
+    {
+      "store": "gog",
+      "id": "1207658924",
+      "title": "The Witcher: Enhanced Edition",
+      "status": "unknown",
+      "revision": 1,
+      "notes": "The GOG installer crashes under Wine 11; MacNative retries automatically with the compatibility engine, which installs it. Gameplay not reported yet.",
+      "testedWith": "MacNative 0.1.0, M2 Pro, macOS 27",
+      "config": { "graphics": "wined3d" }
+    }
+  ]
+}

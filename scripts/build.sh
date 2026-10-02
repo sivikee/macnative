@@ -25,6 +25,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/MacNative" "$APP/Contents/MacOS/MacNative"
 cp -R "$ROOT/Sources/MacNative/Resources/Fonts" "$APP/Contents/Resources/Fonts"
 cp -R "$ROOT/Sources/MacNative/Resources/Logo" "$APP/Contents/Resources/Logo"
+# Bundled fallback for the compatibility database (the app also fetches the latest from GitHub).
+mkdir -p "$APP/Contents/Resources/Compat" && cp "$ROOT/compat/games.json" "$APP/Contents/Resources/Compat/games.json"
 if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi

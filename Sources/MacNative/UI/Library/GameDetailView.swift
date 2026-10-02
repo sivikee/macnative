@@ -37,7 +37,7 @@ struct GameDetailView: View {
                     if game.isInstalled { LaunchCard(game: game) }
                     GameConfigForm(config: Binding(
                         get: { app.game(gameID)?.config ?? .default },
-                        set: { newValue in app.update(gameID) { $0.config = newValue } }),
+                        set: { newValue in app.update(gameID) { $0.config = newValue; $0.configCustomized = true } }),
                         showsEngine: true, steamOptions: game.source == .steam)
                     gameTools(game)
                 }
@@ -117,6 +117,7 @@ struct GameDetailView: View {
 
     @ViewBuilder private func gameMenu(_ game: Game) -> some View {
         Button("Open log") { app.openLog(game) }
+        Button("Report compatibility…") { app.reportCompatibility(game) }
         Button("Show prefix in Finder") { app.revealPrefix(game) }
         if game.source == .steam {
             Button("Open Steam") { Task { try? await app.openSteam(arguments: []) } }
@@ -184,6 +185,7 @@ struct GameDetailView: View {
 
     private func infoSection(_ game: Game) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let entry = app.compat.entry(for: game) { CompatPanel(entry: entry, customized: game.configCustomized == true) }
             Text("Game information").font(Theme.font(18, .semibold)).padding(.bottom, 4)
             HStack(spacing: 12) {
                 InfoCard(label: "Status", value: app.isRunning(game) ? "Running" : game.isInstalled ? "Installed" : "Not installed",
@@ -219,10 +221,39 @@ struct GameDetailView: View {
                 Button("Reveal") { app.revealPrefix(game) }.buttonStyle(PillButtonStyle(prominent: false))
             }
             SettingsRow(symbol: "arrow.uturn.backward", tint: Theme.warning, title: "Reset to defaults") {
-                Button("Reset") { app.update(game.id) { $0.config = app.settings.defaultConfig } }
+                Button("Reset") {
+                    // Back to defaults, then let the compatibility database apply its config again.
+                    app.update(game.id) { $0.config = app.settings.defaultConfig; $0.configCustomized = nil; $0.compatRevision = nil }
+                    app.applyCompatConfigs()
+                }
                     .buttonStyle(PillButtonStyle(prominent: false))
             }
         }
+    }
+}
+
+/// Compatibility database result for the game (GameNative-style badge + notes).
+private struct CompatPanel: View {
+    var entry: CompatEntry
+    var customized: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            CompatibilityBadge(status: entry.status, showsLabel: true)
+            VStack(alignment: .leading, spacing: 4) {
+                if let notes = entry.notes { Text(notes).font(Theme.font(13)) }
+                Text(customized ? "You've customized this game's settings, so the recommended config isn't applied."
+                                : "Recommended settings from the compatibility database are applied.")
+                    .font(Theme.font(11)).foregroundStyle(Theme.muted)
+                if let tested = entry.testedWith {
+                    Text("Tested with \(tested)").font(Theme.font(11)).foregroundStyle(Theme.muted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.surfaceHigh))
+        .padding(.bottom, 10)
     }
 }
 
