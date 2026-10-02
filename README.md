@@ -1,105 +1,180 @@
+<div align="center">
+
+<img src="Resources/Logo/macnative-icon-1024.png" width="160" alt="MacNative icon">
+
 # MacNative
 
-Play the Windows games you own on Steam and GOG on your Mac, from one launcher. No Wine config files, no bottles to manage, no setup hell.
+**Play the Windows games you own on Steam and GOG on your Mac. One app, no setup hell.**
 
-MacNative is a native SwiftUI app. It borrows its design language and its per-game settings model from [GameNative](https://github.com/utkarshdalal/GameNative), the Android launcher, and runs games through Wine, DXVK and DXMT under the hood.
+No bottles to manage, no Wine config files, no Steam client required.
 
-> Status: **v0.1, early.** Expect rough edges and games that don't run yet.
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native-A21CAF?style=flat-square)
+![Swift](https://img.shields.io/badge/Swift-SwiftUI-F05138?style=flat-square&logo=swift&logoColor=white)
 
-## What works in v0.1
+</div>
 
-- **Library.** A GameNative-style grid with Steam, GOG and Custom sources. It has tabs (All / Installed / Favorites / Steam / GOG / Custom), search and favorites, and the selected game's artwork blurs into the backdrop.
-- **GOG.** Sign in, see the Windows games you own, and install them with one click. MacNative downloads the offline installer and runs it silently, with no Galaxy client. Launching reads `goggame-*.info`.
-- **Steam.** One click installs the official Windows Steam client into its own prefix. Installed and owned games show up in the library, and Install / Play are passed to the client. That means Steam DRM, cloud saves and achievements keep working.
+---
+
+MacNative is a native SwiftUI game launcher for Apple Silicon Macs. Sign in to Steam or GOG, press **Install**, then press **Play**. Under the hood it handles Wine, DirectX translation, prefixes and Steam emulation, the same way [GameNative](https://github.com/utkarshdalal/GameNative) does on Android. MacNative is built in its spirit and borrows its look.
+
+> **Status: early (v0.1).** Many games already run, many don't yet. Expect rough edges, and please report what you find.
+
+## Features
+
+### 🎮 Your libraries, natively
+- **Steam, with no Steam client.** Sign in with your password plus Steam Guard, or scan a QR code with the Steam mobile app. MacNative fetches your owned games straight from Steam and downloads them from Steam's CDN, with resumable, verified, parallel downloads. It then launches them with Steamworks emulation, so games that expect Steam still start.
+- **GOG.** Sign in and install any Windows game you own with one click, with no Galaxy client. Installers that crash on modern Wine are retried automatically with a compatibility engine.
 - **Custom games.** Add any Windows `.exe`. Artwork is matched automatically.
-- **Per-game settings**, modelled on GameNative's container config:
-  - graphics backend (WineD3D / DXVK / DXMT)
-  - Wine engine and Windows version
-  - Retina mode, virtual desktop and ⌘-as-Ctrl
-  - MSync / ESync and AVX
-  - DXVK HUD, async and FPS cap; Metal HUD
-  - launch arguments, DLL overrides and environment variables
-- **Controllers.** Xbox, PlayStation (DualShock 4 / DualSense), Switch Pro and MFi pads drive the launcher menus through Apple's GameController framework. In games, Wine's bundled SDL2 exposes them as XInput controllers. The keyboard works too.
-- **Engine manager.** Downloads and switches Wine builds. DXVK and DXMT are fetched automatically the first time a game needs them.
 
-## How it runs Windows games
-
-| Layer | What it does | Source |
+### ⚡️ DirectX on Apple Silicon
+| Backend | Translates | Best for |
 |---|---|---|
-| Rosetta 2 | Translates x86_64 Wine to Apple Silicon | Apple (the only system-wide prerequisite) |
-| Wine (Staging/Devel) | The Windows API | [Gcenx/macOS_Wine_builds](https://github.com/Gcenx/macOS_Wine_builds) |
-| MoltenVK | Vulkan on top of Metal | Bundled in the Wine build |
-| DXVK-macOS | Direct3D 10/11 → Vulkan | [Gcenx/DXVK-macOS](https://github.com/Gcenx/DXVK-macOS) |
-| DXMT | Direct3D 10/11 → Metal | [3Shain/dxmt](https://github.com/3Shain/dxmt) |
-| WineD3D | Direct3D 9 and older → OpenGL | Built into Wine |
-| D3DMetal | Direct3D 11/12 → Metal (the DirectX 12 path) | Apple's Game Porting Toolkit, via [Gcenx's GPTK Wine](https://github.com/Gcenx/game-porting-toolkit), downloaded on first use |
+| **WineD3D** | DirectX 9 and older → OpenGL | Older and 32-bit games |
+| **DXVK** | DirectX 10/11 → Vulkan → Metal (MoltenVK) | Most DX11 games |
+| **DXMT** | DirectX 10/11 → Metal | Often the fastest DX11 path (experimental) |
+| **D3DMetal** | DirectX 11/12 → Metal (Apple's Game Porting Toolkit) | **DirectX 12** and modern 64-bit games |
 
-**Why not Proton?** Proton is Valve's Linux bundle of Wine, DXVK and VKD3D-Proton, and its binaries only run on Linux. MacNative uses Proton's DirectX layer where macOS can run it: DXVK, via the macOS fork. VKD3D-Proton (DirectX 12 → Vulkan) needs Vulkan features that MoltenVK doesn't provide, so it can't run there. On macOS:
-- Wine's built-in vkd3d already handles some simpler DirectX 12 games.
-- Apple's D3DMetal is the real DirectX 12 path. Pick **D3DMetal** as a game's graphics backend, and on first launch MacNative downloads Gcenx's Game Porting Toolkit Wine, which includes it. Apple's own GPTK Read Me points users to that build.
-- **Bring your own (optional):** to use a newer D3DMetal, such as a beta, download Apple's Game Porting Toolkit `.dmg` with a free Apple ID and import it in Settings → Engines. MacNative layers it over the GPTK Wine using an APFS clone, the same file swap Apple's Read Me describes. Nothing from Apple is stored in this repo.
+Pick a backend per game. Everything a backend needs is downloaded the first time a game uses it. Picking D3DMetal for a 32-bit game falls back to WineD3D automatically.
 
-DXMT needs files inside Wine's own lib folder. DXMT needs files inside Wine's own lib folder. Rather than changing the engine, MacNative makes an APFS clone of it (instant, no extra disk space) and adds DXMT to the clone.
+### 🕹️ Controller-first
+Xbox, PlayStation (DualShock 4 / DualSense), Switch Pro and MFi controllers work **in the launcher's menus**, through Apple's GameController framework:
 
-## Self-contained by design
+| Button | Action |
+|---|---|
+| A / Cross | Open / Play |
+| B / Circle | Back |
+| X / Square | Favorite |
+| Y / Triangle | Search |
+| LB / RB | Switch tabs |
+| Menu / Options | Settings |
 
-Everything MacNative creates lives in **one folder**: engines, prefixes, downloads, logs, artwork cache, account tokens, settings and the library. Delete the folder and it's all gone.
+**In games**, controllers show up as standard XInput pads through Wine's SDL support. Keyboard navigation works too: arrows, Return, Esc, Q/E.
 
-- **Release builds:** `~/Library/Application Support/MacNative`
-- **Dev builds** (`scripts/build.sh`): `./data` inside this repo (gitignored)
-- **Override:** the `MACNATIVE_HOME=/some/path` environment variable
+### 🧰 Settings without the Wine homework
+Every game has simple settings, modelled on GameNative's container settings:
+- graphics backend, Wine engine and Windows version
+- Retina mode, virtual desktop, ⌘ as Ctrl
+- MSync / ESync, AVX for Rosetta
+- FPS cap, DXVK and Metal HUDs
+- the executable and launch arguments, DLL overrides and environment variables
 
-MacNative never installs Homebrew packages, system Wine or anything else outside that folder. The one exception is Rosetta 2. If it's missing, MacNative offers to install it through Apple's own `softwareupdate`, behind the standard admin prompt.
+There are no config files to edit.
 
-## Build
+### 📦 Self-contained
+Everything MacNative creates lives in **one folder**: engines, game prefixes, downloads, Steam libraries, logs, caches and sign-ins. Nothing is installed system-wide. The only exception is Apple's Rosetta 2, which MacNative offers to install through macOS's own installer. **Settings → System → Erase everything** removes it all in one click.
 
-Requirements: macOS 14+, Apple Silicon, Xcode command line tools.
+## How it works
 
-```sh
-scripts/build.sh            # dev build → build/MacNative.app, data in ./data
-open build/MacNative.app
-
-scripts/build.sh --release  # release build, data in Application Support
+```
+             ┌──────────────── MacNative (SwiftUI) ────────────────┐
+  Steam ───▶ │ Swift Steam client: login, PICS library, CDN depots │
+  GOG   ───▶ │ GOG API + silent offline installers                 │
+             └───────────────────────┬─────────────────────────────┘
+                                     ▼
+            gbe_fork steamclient (Steamworks emulation, Steam games)
+                                     ▼
+                    Wine (Gcenx macOS builds) under Rosetta 2
+                                     ▼
+          WineD3D │ DXVK + MoltenVK │ DXMT │ D3DMetal (GPTK Wine)
+                                     ▼
+                                   Metal
 ```
 
-The project is a plain Swift package with no dependencies, so `swift build` works too.
+- **Steam** is a from-scratch, dependency-free Swift implementation. It handles the WebSocket CM connection, hand-written protobuf, `IAuthenticationService` login, licenses and PICS, depot keys, manifest request codes, and CDN chunk download, decryption (AES), decompression (LZMA / zstd / zip) and Adler-32 verification. Games launch through [gbe_fork](https://github.com/Detanup01/gbe_fork)'s ColdClientLoader, set up with your real account ID, owned DLC and an encrypted app ticket from Steam.
+- **Wine** comes from [Gcenx's macOS builds](https://github.com/Gcenx/macOS_Wine_builds), which bundle MoltenVK and SDL2. **D3DMetal** uses [Gcenx's Game Porting Toolkit Wine](https://github.com/Gcenx/game-porting-toolkit), the build Apple's own GPTK Read Me points to. You can import a newer D3DMetal from Apple's GPTK download in Settings → Engines.
+- **Engine variants** for DXMT and an imported D3DMetal are APFS clones of the base engine. They're instant and take no extra disk space.
+
+### Why not Proton?
+Proton is Valve's bundle of Wine, DXVK and VKD3D-Proton for **Linux**, and its binaries don't run on macOS. MacNative uses the same building blocks where macOS can run them: Wine and DXVK (the macOS fork). For DirectX 12 it uses Apple's D3DMetal, because VKD3D-Proton needs Vulkan features that MoltenVK doesn't provide.
+
+## Getting started
+
+**Requirements:** an Apple Silicon Mac, macOS 14 or newer, and the Xcode command line tools to build.
+
+```sh
+git clone https://github.com/sivikee/macnative.git
+cd macnative
+scripts/build.sh            # dev build: everything stays in ./data inside the repo
+open build/MacNative.app
+```
+
+A first-run checklist installs Rosetta 2 if needed, downloads a Wine engine (~190 MB), and connects your stores.
+
+| Command | What it does |
+|---|---|
+| `scripts/build.sh` | Dev build. App data lives in `./data` (gitignored). |
+| `scripts/build.sh --release` | Release build. Data lives in `~/Library/Application Support/MacNative`. |
+| `swift test` | Unit tests: protobuf, VDF, ZIP, VZip/LZMA, checksums. |
+| `scripts/make-icon.sh` | Regenerates the app icon from its CoreGraphics source. |
+
+Set `MACNATIVE_HOME=/some/folder` to put the data folder anywhere you like.
+
+## Using it
+
+- **Steam:** Settings → Accounts → Steam → **Sign in**. Your owned Windows games appear under the Steam tab. **Install** downloads directly from Steam, and **Play** launches without the client. For games with heavy DRM or anti-cheat, turn on **Use the Windows Steam client** in that game's settings.
+- **GOG:** Settings → Accounts → GOG → **Sign in**, then **Install** any game.
+- **DirectX 12:** in a game's settings, set Graphics to **D3DMetal**. The first launch downloads what it needs.
+- **When a game won't start:** use the game page ⋯ → **Open log**. Try another graphics backend, Windows version, or launch option (⚙︎ → Launch).
+
+## Roadmap
+
+- [x] Steam: native login, library, downloads, launching via gbe_fork
+- [x] GOG: login, library, silent installs with compatibility fallback
+- [x] WineD3D / DXVK / DXMT / D3DMetal, per-game settings, controller navigation
+- [ ] Steam Cloud saves and achievement sync
+- [ ] Steam game updates, beta branches, file verification, shared redistributables
+- [ ] GOG cloud saves; downloading GOG games through Galaxy's content system instead of installers
+- [ ] Known-good per-game configs applied automatically
+- [ ] Controller navigation inside settings screens
+- [ ] Epic Games
+- [ ] Signed and notarized releases with auto-update
 
 ## Project layout
 
 ```
-Sources/MacNative/
-  App/         App entry, AppState (library, installs, launching), navigation, controller input
-  Core/        Models (Game, GameConfig, …) and Paths (the single data root)
-  Services/    EngineManager, WineRunner, SteamService, GOGService, Downloader, VDF parser, …
-  UI/          Theme (GameNative palette + Bricolage Grotesque), Library, Game page, Settings, Setup
-  Resources/   Fonts (SIL OFL)
-scripts/build.sh
+Sources/
+  MacNative/
+    App/           App entry, AppState (library, installs, launching), SteamStore, navigation, controller input
+    Core/          Models (Game, GameConfig…) and Paths (the single data root)
+    Services/      EngineManager, WineRunner, GOGService, downloads, VDF…
+      Steam/       Swift Steam client: connection, auth, PICS, CDN, depot chunks, installer, gbe_fork launcher
+    UI/            Theme, Library, Game page, Settings, Setup
+  CLzma/           Vendored LZMA SDK decoder (public domain)
+  CZstd/           Vendored zstd single-file decoder (BSD)
+Tests/             Unit tests
+Resources/         App icon and logo sources
+scripts/           build.sh, make-icon.sh
 ```
 
-## Roadmap
+## Contributing
 
-**v0.2 – make more games run**
-- Per-game known-good configs, auto-applied (like GameNative's community configs)
-- MetalFX (DLSS → MetalFX) toggle for D3DMetal; auto-pick D3DMetal for DX12-only games
-- Pause/resume for downloads (v0.1 can cancel them)
-- Controller navigation inside the settings screens
-- Running state and playtime for Steam games; quit Steam cleanly when a game exits
+Issues and pull requests are welcome. Game compatibility reports help most: say which game, which store, which graphics backend, and attach the log. Please keep the project self-contained: no system-wide installs, and new runtime pieces downloaded into the data folder.
 
-**v0.3 – native stores**
-- Native Steam login and depot downloads (no Windows client), the way GameNative uses JavaSteam
-- GOG cloud saves; resumable and parallel GOG downloads
-- Epic Games (Legendary-compatible)
+## Legal
 
-**Later**
-- Compatibility reports, an in-game overlay/quick menu, Game Mode tuning, signed and notarized releases with auto-update
+MacNative only downloads and runs games **your account owns**. It verifies ownership with Steam and GOG and passes Steam's own ownership ticket to games. It does not include or distribute any game, DRM-circumvention tool or proprietary Apple, Valve or Microsoft binary.
+
+- **Downloaded on demand from their official sources:** Wine, DXVK, DXMT, MoltenVK, gbe_fork, and Apple's D3DMetal (via Gcenx's GPTK build, or your own copy from Apple). Each keeps its own license.
+- **GOG sign-in:** uses GOG Galaxy's public client credentials, the same ones Heroic, Lutris and GameNative use.
+
+Not affiliated with Valve, GOG, Apple, CodeWeavers or the GameNative project. Steam and GOG are trademarks of their respective owners.
 
 ## Credits & licenses
 
-MacNative is licensed under **GPL-3.0** (see `LICENSE`), the same licence as GameNative, whose design it follows.
+MacNative is licensed under the **GNU GPL v3.0** (see [LICENSE](LICENSE)).
 
-Third-party pieces:
-- **Downloaded at runtime:** Wine (LGPL), DXVK (zlib), DXMT (zlib), MoltenVK (Apache-2.0). None of them are bundled in this repo.
-- **Bundled:** the Bricolage Grotesque font (SIL OFL 1.1, see `Sources/MacNative/Resources/Fonts/OFL.txt`).
-- **GOG sign-in:** uses the public GOG Galaxy client credentials, the same ones Heroic, Lutris and GameNative use.
-
-Not affiliated with Valve, GOG, Apple or the GameNative project.
+| Component | Role | License |
+|---|---|---|
+| [GameNative](https://github.com/utkarshdalal/GameNative) | Design language and settings model; the inspiration | GPL-3.0 |
+| [Wine](https://www.winehq.org) via [Gcenx's builds](https://github.com/Gcenx/macOS_Wine_builds) | Windows compatibility layer | LGPL-2.1+ |
+| [DXVK-macOS](https://github.com/Gcenx/DXVK-macOS) | Direct3D 10/11 → Vulkan | zlib |
+| [DXMT](https://github.com/3Shain/dxmt) | Direct3D 10/11 → Metal | zlib |
+| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Vulkan → Metal | Apache-2.0 |
+| [gbe_fork](https://github.com/Detanup01/gbe_fork) | Steamworks emulation for client-free launching | LGPL-3.0 |
+| [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/) (D3DMetal) | Direct3D 11/12 → Metal | Apple license |
+| [LZMA SDK](https://7-zip.org/sdk.html) | Steam chunk decompression | Public domain |
+| [zstd](https://github.com/facebook/zstd) | Steam chunk decompression | BSD |
+| [Bricolage Grotesque](https://github.com/ateliertriay/bricolage) | Typeface | SIL OFL 1.1 |
+| [SteamKit2](https://github.com/SteamRE/SteamKit) & [SteamDatabase/Protobufs](https://github.com/SteamDatabase/Protobufs) | Protocol reference | LGPL-2.1 / reference |
