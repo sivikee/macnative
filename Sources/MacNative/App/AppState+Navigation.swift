@@ -83,7 +83,9 @@ extension AppState {
     }
 
     func primaryAction(_ game: Game) async {
-        if isRunning(game) { await stop(game) }
+        if canCancel(game.id) { cancelJob(game.id) }
+        else if activities[game.id] != nil { return }
+        else if isRunning(game) { await stop(game) }
         else if game.isInstalled { await play(game) }
         else { await install(game) }
     }

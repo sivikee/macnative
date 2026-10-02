@@ -9,6 +9,8 @@ final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendabl
     private var progress: Progress?
     private var directory: URL!
     private var task: URLSessionDownloadTask?
+    private var cancelled = false
+    private let lock = NSLock()
 
     /// Downloads `request` into `directory`. The final filename is taken from the server
     /// (after redirects) unless `fileName` is provided.
@@ -27,6 +29,7 @@ final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendabl
                        progress: Progress?) async throws -> URL {
         self.progress = progress
         self.directory = directory
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
@@ -35,8 +38,12 @@ final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendabl
             let (tmp, response) = try await withCheckedThrowingContinuation { cont in
                 self.continuation = cont
                 let task = session.downloadTask(with: request)
+                self.lock.lock()
                 self.task = task
-                task.resume()
+                let alreadyCancelled = self.cancelled
+                self.lock.unlock()
+                // Cancellation may arrive before the task exists; the delegate then reports it.
+                if alreadyCancelled { task.cancel() } else { task.resume() }
             }
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey:
@@ -52,7 +59,11 @@ final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendabl
             try FileManager.default.moveItem(at: tmp, to: target)
             return target
         } onCancel: {
-            self.task?.cancel()
+            self.lock.lock()
+            self.cancelled = true
+            let task = self.task
+            self.lock.unlock()
+            task?.cancel()
         }
     }
 

@@ -33,7 +33,11 @@ MacNative is a native SwiftUI app. It borrows its design language and its per-ga
 | DXMT | Direct3D 10/11 → Metal | [3Shain/dxmt](https://github.com/3Shain/dxmt) |
 | WineD3D | Direct3D 9 and older → OpenGL | Built into Wine |
 
-Proton is Linux-only, so MacNative uses the same building blocks that Proton and CrossOver use on macOS. DXMT needs files inside Wine's own lib folder. Rather than changing the engine, MacNative makes an APFS clone of it (instant, no extra disk space) and adds DXMT to the clone.
+**Why not Proton?** Proton is Valve's Linux bundle of Wine, DXVK and VKD3D-Proton, and its binaries only run on Linux. MacNative uses Proton's DirectX layer where macOS can run it: DXVK, via the macOS fork. VKD3D-Proton (DirectX 12 → Vulkan) needs Vulkan features that MoltenVK doesn't provide, so it can't run there. On macOS:
+- Wine's built-in vkd3d already handles some simpler DirectX 12 games.
+- Apple's D3DMetal is the real DirectX 12 path. Its license doesn't allow bundling it, so the user has to download it from Apple.
+
+DXMT needs files inside Wine's own lib folder. DXMT needs files inside Wine's own lib folder. Rather than changing the engine, MacNative makes an APFS clone of it (instant, no extra disk space) and adds DXMT to the clone.
 
 ## Self-contained by design
 
@@ -74,7 +78,8 @@ scripts/build.sh
 
 **v0.2 – make more games run**
 - Per-game known-good configs, auto-applied (like GameNative's community configs)
-- Bring-your-own D3DMetal from Apple's Game Porting Toolkit, for DirectX 12
+- DirectX 12 via D3DMetal: guided in-app download of Apple's Game Porting Toolkit (free Apple ID), extracted into the data folder
+- Pause/resume for downloads (v0.1 can cancel them)
 - Controller navigation inside the settings screens
 - Running state and playtime for Steam games; quit Steam cleanly when a game exits
 

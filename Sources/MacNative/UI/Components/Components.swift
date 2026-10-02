@@ -82,6 +82,26 @@ struct GradientProgressBar: View {
     }
 }
 
+/// Round ✕ button that cancels a running job (download/install).
+struct CancelJobButton: View {
+    @Environment(AppState.self) private var app
+    var jobID: String
+
+    var body: some View {
+        if app.canCancel(jobID) {
+            Button { app.cancelJob(jobID) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Theme.foreground)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Theme.danger.opacity(0.8)))
+            }
+            .buttonStyle(.plain)
+            .help("Cancel")
+        }
+    }
+}
+
 /// Small label/value tile on the game page (GameNative `InfoCard`).
 struct InfoCard: View {
     var label: String

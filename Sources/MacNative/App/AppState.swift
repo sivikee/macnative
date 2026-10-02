@@ -67,6 +67,8 @@ final class AppState {
     var showSetup = false
 
     private(set) var activities: [String: Activity] = [:]
+    /// Cancellable background jobs, keyed like `activities`.
+    private(set) var jobs: [String: Task<Void, Never>] = [:]
     private(set) var running: Set<String> = []
     private var processes: [String: Process] = [:]
     private var steamClientConfig: GameConfig?
@@ -143,16 +145,50 @@ final class AppState {
 
     private func endActivity(_ id: String) { activities[id] = nil }
 
+    /// Progress callbacks arrive asynchronously; ignore any that land after the job ended or was cancelled.
+    private func updateProgress(_ id: String, _ title: String, _ detail: String, _ progress: Double?) {
+        guard activities[id] != nil, jobs[id]?.isCancelled != true else { return }
+        setActivity(id, title, detail, progress)
+    }
+
     private func progressHandler(_ id: String, _ title: String, _ detail: String) -> Downloader.Progress {
         { [weak self] received, total in
             let fraction = total > 0 ? Double(received) / Double(total) : nil
             let text = total > 0 ? "\(detail) · \(Format.bytes(received)) of \(Format.bytes(total))" : detail
-            Task { @MainActor in self?.setActivity(id, title, text, fraction) }
+            Task { @MainActor in self?.updateProgress(id, title, text, fraction) }
         }
     }
 
     func report(_ error: Error) {
+        guard !Self.isCancellation(error) else { return }
         toast = error.localizedDescription
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    // MARK: Jobs
+
+    /// Runs `work` as a cancellable job. Only one job per id at a time.
+    private func startJob(_ id: String, _ work: @escaping @MainActor () async -> Void) {
+        guard jobs[id] == nil else { return }
+        jobs[id] = Task { @MainActor [weak self] in
+            await work()
+            self?.jobs[id] = nil
+        }
+    }
+
+    func canCancel(_ id: String) -> Bool { jobs[id] != nil && jobs[id]?.isCancelled == false }
+
+    func cancelJob(_ id: String) {
+        guard let job = jobs[id], !job.isCancelled else { return }
+        job.cancel()
+        if var a = activities[id] {
+            a.detail = "Cancelling…"
+            a.progress = nil
+            activities[id] = a
+        }
     }
 
     // MARK: Setup
@@ -173,7 +209,11 @@ final class AppState {
         rosettaInstalled = SystemCheck.isRosettaInstalled
     }
 
-    func installEngine(_ release: EngineRelease) async {
+    func installEngine(_ release: EngineRelease) {
+        startJob("engine:\(release.id)") { [weak self] in await self?.runEngineInstall(release) }
+    }
+
+    private func runEngineInstall(_ release: EngineRelease) async {
         let id = "engine:\(release.id)"
         setActivity(id, release.name, "Downloading…", 0)
         defer { endActivity(id) }
@@ -293,6 +333,13 @@ final class AppState {
                            config: config, verboseLogging: settings.verboseWineLogging)
     }
 
+    /// Stops every Wine process in a prefix without needing a fully prepared context.
+    private func killPrefix(_ name: String, config: GameConfig) async {
+        guard let engine = engines.engine(id: config.engineID ?? settings.defaultEngineID) else { return }
+        await WineRunner.kill(WineContext(wineRoot: engine.wineRoot,
+                                          prefix: Paths.prefixes.appendingPathComponent(name), config: config))
+    }
+
     private func preparedContext(for game: Game) async throws -> WineContext {
         let ctx = try await context(prefix: game.prefixName, config: game.config)
         try await WineRunner.preparePrefix(ctx)
@@ -305,16 +352,23 @@ final class AppState {
 
     // MARK: Steam client
 
-    func installSteamClient() async {
+    func installSteamClient() {
+        startJob("steam-client") { [weak self] in await self?.runSteamClientInstall() }
+    }
+
+    private func runSteamClientInstall() async {
         let id = "steam-client"
         setActivity(id, "Steam", "Preparing…", nil)
         defer { endActivity(id) }
         do {
             let ctx = try await context(prefix: SteamService.prefixName, config: settings.defaultConfig)
             try await SteamService.installClient(ctx, progress: progressHandler(id, "Steam", "Downloading installer"))
+            try Task.checkCancellation()
             setActivity(id, "Steam", "Starting Steam — sign in to load your library", nil)
             try await openSteam(arguments: [])
         } catch {
+            // A cancelled installer may leave Wine processes behind in the Steam prefix.
+            if Self.isCancellation(error) { await killPrefix(SteamService.prefixName, config: settings.defaultConfig) }
             report(error)
         }
     }
@@ -361,7 +415,7 @@ final class AppState {
         case .steam:
             do { try await openSteam(arguments: ["steam://install/\(game.externalID)"]) } catch { report(error) }
         case .gog:
-            await installGOG(game)
+            startJob(game.id) { [weak self] in await self?.installGOG(game) }
         case .custom:
             break
         }
@@ -371,9 +425,10 @@ final class AppState {
         let id = game.id
         setActivity(id, game.title, "Fetching installer…", nil)
         defer { endActivity(id) }
+        let dir = Paths.downloads.appendingPathComponent("gog-\(game.externalID)", isDirectory: true)
+        var installerStarted = false
         do {
             let files = try await GOGService.installerFiles(gameID: game.externalID)
-            let dir = Paths.downloads.appendingPathComponent("gog-\(game.externalID)", isDirectory: true)
             let total = files.reduce(0) { $0 + $1.size }
             var done: Int64 = 0
             var downloaded: [URL] = []
@@ -385,7 +440,7 @@ final class AppState {
                     [weak self] received, _ in
                     let p = total > 0 ? Double(base + received) / Double(total) : nil
                     let text = "\(part) · \(Format.bytes(base + received)) of \(Format.bytes(total))"
-                    Task { @MainActor in self?.setActivity(id, game.title, text, p) }
+                    Task { @MainActor in self?.updateProgress(id, game.title, text, p) }
                 }
                 done += file.size
                 downloaded.append(local)
@@ -394,7 +449,9 @@ final class AppState {
                 throw GOGService.GOGError.noWindowsInstaller
             }
 
+            try Task.checkCancellation()
             setActivity(id, game.title, "Installing…", nil)
+            installerStarted = true
             let ctx = try await preparedContext(for: game)
             let folder = Format.safeFolderName(game.title)
             let installDir = ctx.prefix.appendingPathComponent("drive_c/Games/\(folder)", isDirectory: true)
@@ -419,6 +476,14 @@ final class AppState {
                 $0.installSizeBytes = Format.directorySize(installDir)
             }
         } catch {
+            if Self.isCancellation(error) {
+                // Drop partial downloads; a half-run installer means the prefix is unusable too.
+                try? FileManager.default.removeItem(at: dir)
+                if installerStarted {
+                    await killPrefix(game.prefixName, config: game.config)
+                    try? FileManager.default.removeItem(at: Paths.prefixes.appendingPathComponent(game.prefixName))
+                }
+            }
             report(error)
         }
     }

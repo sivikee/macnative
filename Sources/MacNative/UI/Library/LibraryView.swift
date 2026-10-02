@@ -64,7 +64,7 @@ struct LibraryView: View {
                     Button(SteamService.isClientInstalled ? "Open Steam" : "Set up Steam") {
                         Task {
                             if SteamService.isClientInstalled { try? await app.openSteam(arguments: []) }
-                            else { await app.installSteamClient() }
+                            else { app.installSteamClient() }
                         }
                     }
                     .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))

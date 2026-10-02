@@ -121,6 +121,21 @@ final class EngineManager {
         let staging = Paths.engines.appendingPathComponent(".\(release.id)-extract", isDirectory: true)
         try? FileManager.default.removeItem(at: staging)
         try? FileManager.default.removeItem(at: target)
+        do {
+            try await extractEngine(archive, staging: staging, target: target)
+        } catch {
+            // Cancelled or failed: leave nothing half-installed behind.
+            try? FileManager.default.removeItem(at: staging)
+            try? FileManager.default.removeItem(at: target)
+            throw error
+        }
+
+        let engine = InstalledEngine(id: release.id, name: release.name, version: release.version, installedAt: .now)
+        try JSONEncoder.pretty.encode(engine).write(to: target.appendingPathComponent("engine.json"))
+        reloadInstalled()
+    }
+
+    private func extractEngine(_ archive: URL, staging: URL, target: URL) async throws {
         // Archive layout: "Wine Staging.app/Contents/Resources/wine/{bin,lib,share}". Only that
         // subtree is wanted (the .app's own launcher would collide with the stripped `wine` folder).
         try await Shell.extract(archive, to: staging, stripComponents: 3, include: "*/Contents/Resources/wine/*")
@@ -130,10 +145,7 @@ final class EngineManager {
         try? FileManager.default.removeItem(at: staging)
         // Downloaded files are quarantined; clear it so Gatekeeper doesn't block every dylib.
         _ = try? await Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", target.path])
-
-        let engine = InstalledEngine(id: release.id, name: release.name, version: release.version, installedAt: .now)
-        try JSONEncoder.pretty.encode(engine).write(to: target.appendingPathComponent("engine.json"))
-        reloadInstalled()
+        try Task.checkCancellation()
     }
 
     func uninstall(_ engine: InstalledEngine) throws {
@@ -148,8 +160,13 @@ final class EngineManager {
         defer { try? FileManager.default.removeItem(at: archive) }
         let tmp = dir.deletingLastPathComponent().appendingPathComponent(".extract-\(c.version)")
         try? FileManager.default.removeItem(at: tmp)
-        try await Shell.extract(archive, to: tmp, stripComponents: 1)
-        try FileManager.default.moveItem(at: tmp, to: dir)
+        do {
+            try await Shell.extract(archive, to: tmp, stripComponents: 1)
+            try FileManager.default.moveItem(at: tmp, to: dir)
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            throw error
+        }
         return dir
     }
 

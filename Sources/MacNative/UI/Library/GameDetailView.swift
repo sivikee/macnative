@@ -132,9 +132,11 @@ struct GameDetailView: View {
     private func primaryButton(_ game: Game) -> some View {
         let activity = app.activities[game.id]
         let running = app.isRunning(game)
+        let cancellable = app.canCancel(game.id)
         let (label, symbol, color): (String, String, Color) =
             running ? ("Stop", "stop.fill", Theme.danger)
-            : activity != nil ? (activity!.progress.map { "\(Int($0 * 100))%" } ?? "Working…", "arrow.down", Theme.statusDownloading)
+            : activity != nil ? (activity!.progress.map { "\(Int($0 * 100))%" } ?? "Working…",
+                                 cancellable ? "xmark" : "arrow.down", Theme.statusDownloading)
             : game.isInstalled ? ("Play", "play.fill", Theme.statusInstalled)
             : ("Install", "arrow.down.to.line", Theme.statusAvailable)
 
@@ -149,6 +151,11 @@ struct GameDetailView: View {
                         GradientProgressBar(progress: activity.progress, height: 4).frame(width: 120)
                         Text(activity.detail).font(Theme.font(11)).lineLimit(1).opacity(0.85)
                     }
+                    if cancellable {
+                        Text("Cancel").font(Theme.font(13, .semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Capsule().fill(.black.opacity(0.3)))
+                    }
                 }
             }
             .foregroundStyle(.white)
@@ -156,7 +163,9 @@ struct GameDetailView: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(activity != nil ? 0.6 : 1)))
         }
         .buttonStyle(.plain)
-        .disabled(activity != nil)
+        // While downloading, the button cancels; it's only inert for jobs that can't be cancelled.
+        .disabled(activity != nil && !cancellable)
+        .help(cancellable ? "Cancel download (A / Cross)" : "")
     }
 
     private func squareButton(_ symbol: String, tint: Color = .white, index: Int, action: @escaping () -> Void) -> some View {

@@ -139,7 +139,11 @@ enum WineRunner {
 
     /// Kills every process in the prefix.
     static func kill(_ ctx: WineContext) async {
-        _ = try? await Shell.run(ctx.wineserverBinary.path, ["-k"], environment: ctx.environment)
+        let path = ctx.wineserverBinary.path, env = ctx.environment
+        // Detached so it still runs when called from a cancelled task (cleanup after cancel).
+        await Task.detached {
+            _ = try? await Shell.run(path, ["-k"], environment: env)
+        }.value
     }
 
     static func waitForWineserver(_ ctx: WineContext) async throws {

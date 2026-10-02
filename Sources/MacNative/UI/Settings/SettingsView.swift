@@ -121,10 +121,11 @@ private struct EnginesSection: View {
                             subtitle: activity?.detail ?? Format.bytes(r.sizeBytes)) {
                     if let activity {
                         GradientProgressBar(progress: activity.progress).frame(width: 140)
+                        CancelJobButton(jobID: "engine:\(r.id)")
                     } else if installed {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.statusInstalled)
                     } else {
-                        Button("Download") { Task { await app.installEngine(r) } }
+                        Button("Download") { app.installEngine(r) }
                             .buttonStyle(PillButtonStyle())
                     }
                 }
@@ -137,7 +138,7 @@ private struct EnginesSection: View {
             component(EngineManager.dxmt, symbol: "cube.fill", tint: Theme.primaryLight,
                       text: "DirectX 10/11 → Metal (experimental)")
             SettingsRow(symbol: "lock.fill", tint: Theme.muted, title: "D3DMetal (Apple Game Porting Toolkit)",
-                        subtitle: "Planned: bring-your-own, since Apple's license forbids bundling it.") { EmptyView() }
+                        subtitle: "DirectX 12 → Metal. Planned as a guided download from Apple, because its license forbids bundling it. Until then, Wine's built-in vkd3d handles some simpler DX12 games.") { EmptyView() }
         }
     }
 
@@ -167,13 +168,14 @@ private struct AccountsSection: View {
                             : "Downloads the official installer from Valve (~2 MB, then Steam updates itself).")) {
                 if let activity {
                     GradientProgressBar(progress: activity.progress).frame(width: 140)
+                    CancelJobButton(jobID: "steam-client")
                 } else if SteamService.isClientInstalled {
                     Button("Open Steam") { Task { do { try await app.openSteam(arguments: []) } catch { app.report(error) } } }
                         .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
                     Button("Rescan") { Task { await app.syncSteam() } }
                         .buttonStyle(PillButtonStyle(prominent: false))
                 } else {
-                    Button("Set up Steam") { Task { await app.installSteamClient() } }
+                    Button("Set up Steam") { app.installSteamClient() }
                         .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
                 }
             }

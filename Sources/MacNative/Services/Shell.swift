@@ -13,12 +13,15 @@ enum ShellError: LocalizedError {
 
 enum Shell {
     /// Runs a process to completion and returns its combined stdout/stderr.
+    /// Cancelling the calling task terminates the process.
     @discardableResult
     static func run(_ executable: String, _ arguments: [String],
                     environment: [String: String]? = nil,
                     currentDirectory: URL? = nil) async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
-            let process = Process()
+        try Task.checkCancellation()
+        let process = Process()
+        let output: String = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
             if let environment { process.environment = environment }
@@ -45,7 +48,12 @@ enum Shell {
                 }
             }
             do { try process.run() } catch { cont.resume(throwing: error) }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
         }
+        try Task.checkCancellation()
+        return output
     }
 
     /// Extracts a .tar.xz / .tar.gz archive with the system `tar` (bsdtar handles both).

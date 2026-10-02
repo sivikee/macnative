@@ -18,20 +18,20 @@ struct SetupView: View {
             }
 
             step(1, "Rosetta 2", "Apple's translator for Intel apps. Wine needs it on Apple Silicon.",
-                 done: app.rosettaInstalled, activity: app.activities["rosetta"]) {
+                 done: app.rosettaInstalled, activity: app.activities["rosetta"], jobID: "rosetta") {
                 Button("Install Rosetta") { Task { await app.installRosetta() } }.buttonStyle(PillButtonStyle())
             }
 
             step(2, "Wine engine", "\(recommended.name) · \(Format.bytes(recommended.sizeBytes)). Includes MoltenVK for Vulkan/DXVK.",
-                 done: engineReady, activity: engineActivity) {
-                Button("Download") { Task { await app.installEngine(recommended) } }.buttonStyle(PillButtonStyle())
+                 done: engineReady, activity: engineActivity, jobID: "engine:\(recommended.id)") {
+                Button("Download") { app.installEngine(recommended) }.buttonStyle(PillButtonStyle())
             }
 
             step(3, "Connect your stores", "Optional — you can do this later in Settings → Accounts.",
-                 done: app.isGOGLoggedIn || SteamService.isClientInstalled, activity: app.activities["steam-client"]) {
+                 done: app.isGOGLoggedIn || SteamService.isClientInstalled, activity: app.activities["steam-client"], jobID: "steam-client") {
                 HStack {
                     Button("GOG") { app.showGOGLogin = true }.buttonStyle(PillButtonStyle(color: Theme.purple))
-                    Button("Steam") { Task { await app.installSteamClient() } }
+                    Button("Steam") { app.installSteamClient() }
                         .buttonStyle(PillButtonStyle(color: Theme.statusAvailable))
                         .disabled(!engineReady || !app.rosettaInstalled)
                 }
@@ -53,7 +53,7 @@ struct SetupView: View {
         .shadow(color: Theme.primary.opacity(0.25), radius: 40)
     }
 
-    private func step<Action: View>(_ n: Int, _ title: String, _ text: String, done: Bool, activity: Activity?,
+    private func step<Action: View>(_ n: Int, _ title: String, _ text: String, done: Bool, activity: Activity?, jobID: String,
                                     @ViewBuilder action: () -> Action) -> some View {
         HStack(alignment: .center, spacing: 16) {
             ZStack {
@@ -71,7 +71,8 @@ struct SetupView: View {
                 if let activity { GradientProgressBar(progress: activity.progress).padding(.top, 4) }
             }
             Spacer()
-            if !done && activity == nil { action() }
+            if activity != nil { CancelJobButton(jobID: jobID) }
+            else if !done { action() }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.secondary.opacity(0.25)))
