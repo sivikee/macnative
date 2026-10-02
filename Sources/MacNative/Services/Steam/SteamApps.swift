@@ -41,10 +41,30 @@ struct SteamAppInfo: Codable, Hashable {
     var isDLC: Bool { type.lowercased() == "dlc" }
     var runsOnWindows: Bool { osList.isEmpty || osList.contains("windows") }
 
-    /// Launch entries usable on Windows, default first.
+    /// Launch entries usable on Windows (no beta-only entries), in Steam's order.
     var windowsLaunchOptions: [LaunchOption] {
         launch.filter { ($0.osList.isEmpty || $0.osList.contains("windows")) && $0.betaKey == nil }
-            .sorted { a, _ in a.type == nil || a.type == "default" || a.type == "none" }
+    }
+
+    /// The entry a player most likely means by "Play": one whose file exists, a default type,
+    /// and not an editor/server/tool. Ties keep Steam's order.
+    func bestLaunchOption(installDir: URL) -> LaunchOption? {
+        func score(_ o: LaunchOption) -> Int {
+            var s = 0
+            let exe = installDir.appendingPathComponent(o.executable.replacingOccurrences(of: "\\", with: "/"))
+            if FileManager.default.fileExists(atPath: exe.path) { s += 100 }
+            if o.type == nil || o.type == "default" || o.type == "none" { s += 10 }
+            if o.osList.contains("windows") { s += 2 }
+            let text = "\(o.description ?? "") \(o.executable)".lowercased()
+            if ["editor", "server", "tool", "benchmark", "config", "safe mode", "sdk", "modded"]
+                .contains(where: text.contains) { s -= 50 }
+            return s
+        }
+        let options = windowsLaunchOptions
+        return options.enumerated().max { a, b in
+            let (sa, sb) = (score(a.element), score(b.element))
+            return sa == sb ? a.offset > b.offset : sa < sb
+        }?.element
     }
 
     init?(appID: UInt32, kv: VDF.Node) {

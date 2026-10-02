@@ -609,18 +609,31 @@ final class AppState {
     }
 
     /// Fills install fields of a Steam game from its install record and PICS launch options.
+    /// Keeps a launch target the user chose, as long as it still exists.
     func applySteamInstall(_ g: inout Game, app: SteamAppInfo, record: SteamInstallRecord) {
         g.installState = .installed
         g.installDirectory = record.installDir
         g.installSizeBytes = record.sizeOnDisk
+        if let exe = g.executablePath, FileManager.default.fileExists(atPath: exe) { return }
         let dir = URL(fileURLWithPath: record.installDir)
-        if let launch = app.windowsLaunchOptions.first {
-            let exe = dir.appendingPathComponent(launch.executable.replacingOccurrences(of: "\\", with: "/"))
-            g.executablePath = exe.path
-            g.workingDirectory = launch.workingDir.flatMap { $0.isEmpty ? nil : $0 }
-                .map { dir.appendingPathComponent($0.replacingOccurrences(of: "\\", with: "/")).path }
-                ?? exe.deletingLastPathComponent().path
-            g.steamLaunchArguments = launch.arguments
+        if let launch = app.bestLaunchOption(installDir: dir) { setSteamLaunch(&g, launch, installDir: dir) }
+    }
+
+    func setSteamLaunch(_ g: inout Game, _ launch: SteamAppInfo.LaunchOption, installDir dir: URL) {
+        let exe = dir.appendingPathComponent(launch.executable.replacingOccurrences(of: "\\", with: "/"))
+        g.executablePath = exe.path
+        g.workingDirectory = launch.workingDir.flatMap { $0.isEmpty ? nil : $0 }
+            .map { dir.appendingPathComponent($0.replacingOccurrences(of: "\\", with: "/")).path }
+            ?? exe.deletingLastPathComponent().path
+        g.steamLaunchArguments = launch.arguments?.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Points a game at an executable the user picked.
+    func setCustomExecutable(_ gameID: String, _ exe: URL) {
+        update(gameID) {
+            $0.executablePath = exe.path
+            $0.workingDirectory = exe.deletingLastPathComponent().path
+            $0.steamLaunchArguments = nil
         }
     }
 

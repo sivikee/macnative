@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Game page (GameNative `LibraryAppScreen`): parallax hero, title block, action panel, info cards.
 struct GameDetailView: View {
@@ -33,6 +34,7 @@ struct GameDetailView: View {
                 SidePanel(title: "\(game.title)", subtitle: "Per-game settings · B / Esc to close") {
                     app.showGameSettings = false
                 } content: {
+                    if game.isInstalled { LaunchCard(game: game) }
                     GameConfigForm(config: Binding(
                         get: { app.game(gameID)?.config ?? .default },
                         set: { newValue in app.update(gameID) { $0.config = newValue } }),
@@ -219,6 +221,64 @@ struct GameDetailView: View {
                     .buttonStyle(PillButtonStyle(prominent: false))
             }
         }
+    }
+}
+
+/// Which executable "Play" starts: Steam's launch entries, or any .exe the user picks.
+private struct LaunchCard: View {
+    @Environment(AppState.self) private var app
+    var game: Game
+
+    var body: some View {
+        let installDir = game.installDirectory.map { URL(fileURLWithPath: $0) }
+        let steamApp = game.source == .steam ? UInt32(game.externalID).flatMap { app.steam.apps[$0] } : nil
+        let options = steamApp?.windowsLaunchOptions ?? []
+
+        SettingsCard(title: "Launch", subtitle: "What Play starts") {
+            if options.count > 1, let installDir {
+                SettingsRow(symbol: "list.bullet", tint: Theme.statusAvailable, title: "Steam launch option") {
+                    Picker("", selection: Binding(
+                        get: { options.firstIndex { option(option: $0, matches: game, in: installDir) } ?? -1 },
+                        set: { i in
+                            guard options.indices.contains(i) else { return }
+                            app.update(game.id) { app.setSteamLaunch(&$0, options[i], installDir: installDir) }
+                        })) {
+                        if !options.contains(where: { option(option: $0, matches: game, in: installDir) }) {
+                            Text("Custom").tag(-1)
+                        }
+                        ForEach(options.indices, id: \.self) { i in
+                            Text(options[i].description ?? options[i].executable).tag(i)
+                        }
+                    }
+                    .labelsHidden().frame(width: 200)
+                }
+            }
+            let exe = game.executablePath
+            let exists = exe.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            SettingsRow(symbol: exists ? "app.badge.checkmark" : "exclamationmark.triangle.fill",
+                        tint: exists ? Theme.success : Theme.warning, title: "Executable",
+                        subtitle: exe.map { relative($0, to: installDir) } ?? "Not set") {
+                Button("Choose…") { choose(startIn: installDir) }.buttonStyle(PillButtonStyle(prominent: false))
+            }
+        }
+    }
+
+    private func option(option o: SteamAppInfo.LaunchOption, matches g: Game, in dir: URL) -> Bool {
+        let path = dir.appendingPathComponent(o.executable.replacingOccurrences(of: "\\", with: "/")).path
+        return path == g.executablePath && (o.arguments?.trimmingCharacters(in: .whitespaces) ?? "") == (g.steamLaunchArguments ?? "")
+    }
+
+    private func relative(_ path: String, to dir: URL?) -> String {
+        guard let dir, path.hasPrefix(dir.path + "/") else { return path }
+        return String(path.dropFirst(dir.path.count + 1))
+    }
+
+    private func choose(startIn dir: URL?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "exe") ?? .item]
+        panel.directoryURL = dir
+        panel.message = "Choose the program Play should start"
+        if panel.runModal() == .OK, let url = panel.url { app.setCustomExecutable(game.id, url) }
     }
 }
 

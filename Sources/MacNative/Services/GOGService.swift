@@ -191,7 +191,7 @@ enum GOGService {
             switch self {
             case .notLoggedIn: "Sign in to GOG in Settings → Accounts."
             case .noWindowsInstaller: "This game has no Windows installer on GOG."
-            case .noExecutable: "Installed, but couldn't find the game's executable. Set it in the game's settings."
+            case .noExecutable: "Couldn't find the game's executable. Pick it in the game's settings (⚙︎ → Launch)."
             }
         }
     }
