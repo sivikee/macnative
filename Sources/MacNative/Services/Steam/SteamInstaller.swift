@@ -43,9 +43,8 @@ enum SteamInstaller {
             guard d.osList.isEmpty || d.osList.contains("windows") else { return false }
             if let lang = d.language, lang != language { return false }
             if let dlc = d.dlcAppID, !ownership.appIDs.contains(dlc) { return false }
-            // Some owned depots aren't listed per package, so also accept the app itself being owned.
+            // Same rule as DepotDownloader: a license must list the depot (some list it as an app id).
             return ownership.depotIDs.contains(d.id) || ownership.appIDs.contains(d.id)
-                || ownership.appIDs.contains(app.appID)
         }
         let has64 = candidates.contains { $0.osArch == "64" }
         return candidates.filter { d in
@@ -71,13 +70,22 @@ enum SteamInstaller {
         let cdn = try await SteamCDN.discover(steam)
 
         var manifests: [(DepotManifest, Data)] = []
+        var firstError: Error?
         for (n, depot) in depots.enumerated() {
             progress(Progress(phase: "Reading depot \(n + 1) of \(depots.count)…", done: 0, total: 0))
             let gid = depot.manifests["public"]!
-            let key = try await steam.depotKey(depotID: depot.id, appID: app.appID)
+            let key: Data
+            do {
+                key = try await steam.depotKey(depotID: depot.id, appID: app.appID)
+            } catch let e as SteamError where e.eresult == 15 {
+                // Access denied: an optional depot this account can't use. Skip it.
+                firstError = firstError ?? e
+                continue
+            }
             let code = try await steam.manifestRequestCode(appID: app.appID, depotID: depot.id, gid: gid)
             manifests.append((try await cdn.manifest(depotID: depot.id, gid: gid, requestCode: code, key: key), key))
         }
+        if manifests.isEmpty { throw firstError ?? SteamError(message: "\(app.name) has no Windows content you own") }
 
         let target = installDirectory(app)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
