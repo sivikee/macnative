@@ -732,8 +732,15 @@ final class AppState {
     }
 
     private func runPlay(_ game: Game) async {
+        var game = game
         let id = game.id
         setActivity(id, game.title, "Preparing…", nil)
+        // D3DMetal only runs 64-bit DirectX 11/12 games; older 32-bit games use the regular engine.
+        if game.config.graphics == .d3dmetal, let exe = game.executablePath,
+           FileManager.default.fileExists(atPath: exe), !PEInfo.is64Bit(URL(fileURLWithPath: exe)) {
+            game.config.graphics = .wined3d
+            toast = "\(game.title) is a 32-bit game, which D3DMetal can't run. Using WineD3D instead. You can change this in the game's settings."
+        }
         do {
             try await ensureD3DMetalEngine(game.config, activityID: id, title: game.title)
             if game.source == .steam, game.config.useSteamClient {
