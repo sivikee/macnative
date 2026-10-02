@@ -7,7 +7,7 @@ struct EngineRelease: Identifiable, Hashable, Codable {
     var id: String          // e.g. "wine-staging-11.18"
     var name: String        // e.g. "Wine Staging 11.18"
     var version: String
-    var flavor: String      // "staging" | "devel"
+    var flavor: String      // "staging" | "devel" | "gptk"
     var url: URL
     var sizeBytes: Int64
 }
@@ -17,10 +17,23 @@ struct InstalledEngine: Identifiable, Hashable, Codable {
     var name: String
     var version: String
     var installedAt: Date
+    /// `gptk` for Apple's Game Porting Toolkit Wine (D3DMetal); nil/"staging"/"devel" otherwise.
+    var flavor: String?
 
+    var isGPTK: Bool { flavor == "gptk" }
     var directory: URL { Paths.engines.appendingPathComponent(id, isDirectory: true) }
     /// Root of the Wine install (`bin/`, `lib/`, `share/`).
     var wineRoot: URL { directory.appendingPathComponent("wine", isDirectory: true) }
+}
+
+/// D3DMetal libraries imported from Apple's Game Porting Toolkit download.
+struct D3DMetalImport: Codable, Hashable {
+    var version: String
+    var importedAt: Date
+
+    var directory: URL { Paths.components.appendingPathComponent("d3dmetal/\(version)", isDirectory: true) }
+    /// Mirrors Apple's `redist/lib`: `external/` (D3DMetal.framework) and `wine/<arch>/`.
+    var lib: URL { directory.appendingPathComponent("lib", isDirectory: true) }
 }
 
 /// Translation layers that are dropped into an engine or prefix on demand.
@@ -47,13 +60,26 @@ final class EngineManager {
         id: "dxmt", name: "DXMT", version: "v0.80",
         url: URL(string: "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz")!)
 
+    /// Apple's Game Porting Toolkit Wine, built by Gcenx (https://github.com/Gcenx/game-porting-toolkit).
+    /// It ships D3DMetal and is one of the builds Apple's own GPTK Read Me points users to.
+    private(set) var gptkRelease = EngineRelease(
+        id: "gptk-3.0-3", name: "Game Porting Toolkit 3.0-3", version: "3.0-3", flavor: "gptk",
+        url: URL(string: "https://github.com/Gcenx/game-porting-toolkit/releases/download/Game-Porting-Toolkit-3.0-3/game-porting-toolkit-3.0-3.tar.xz")!,
+        sizeBytes: 239_200_808)
+
+    /// A newer D3DMetal the user imported from Apple, layered over the GPTK engine.
+    private(set) var d3dmetalImport: D3DMetalImport?
+
     /// Known-good fallback if the GitHub API is unreachable or rate limited.
     static let fallbackEngine = EngineRelease(
         id: "wine-staging-11.18", name: "Wine Staging 11.18", version: "11.18", flavor: "staging",
         url: URL(string: "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.18/wine-staging-11.18-osx64.tar.xz")!,
         sizeBytes: 193_105_336)
 
-    init() { reloadInstalled() }
+    init() {
+        reloadInstalled()
+        reloadD3DMetalImport()
+    }
 
     func reloadInstalled() {
         let fm = FileManager.default
@@ -62,13 +88,17 @@ final class EngineManager {
             guard let data = try? Data(contentsOf: dir.appendingPathComponent("engine.json")) else { return nil }
             return try? JSONDecoder.iso.decode(InstalledEngine.self, from: data)
         }
-        .filter { fm.isExecutableFile(atPath: $0.wineRoot.appendingPathComponent("bin/wine").path) }
+        .filter { WineContext.wineBinary(in: $0.wineRoot) != nil }
         .sorted { $0.installedAt > $1.installedAt }
     }
 
+    /// Engines for regular games. The GPTK engine is reserved for the D3DMetal backend.
+    var regularEngines: [InstalledEngine] { installed.filter { !$0.isGPTK } }
+    var gptkEngine: InstalledEngine? { installed.first(where: \.isGPTK) }
+
     func engine(id: String?) -> InstalledEngine? {
         if let id, let e = installed.first(where: { $0.id == id }) { return e }
-        return installed.first
+        return regularEngines.first
     }
 
     func isComponentInstalled(_ c: ComponentRelease) -> Bool {
@@ -104,6 +134,15 @@ final class EngineManager {
             catalogError = "Couldn't reach GitHub, showing the bundled default."
         }
         if available.isEmpty { available = [Self.fallbackEngine] }
+
+        if let url = URL(string: "https://api.github.com/repos/Gcenx/game-porting-toolkit/releases?per_page=1"),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let r = (try? JSONDecoder().decode([GitHubRelease].self, from: data))?.first,
+           let a = r.assets.first(where: { $0.name.hasSuffix(".tar.xz") }) {
+            let version = r.tag_name.replacingOccurrences(of: "Game-Porting-Toolkit-", with: "")
+            gptkRelease = EngineRelease(id: "gptk-\(version)", name: "Game Porting Toolkit \(version)",
+                                        version: version, flavor: "gptk", url: a.browser_download_url, sizeBytes: a.size)
+        }
     }
 
     var recommended: EngineRelease {
@@ -130,7 +169,8 @@ final class EngineManager {
             throw error
         }
 
-        let engine = InstalledEngine(id: release.id, name: release.name, version: release.version, installedAt: .now)
+        let engine = InstalledEngine(id: release.id, name: release.name, version: release.version,
+                                     installedAt: .now, flavor: release.flavor)
         try JSONEncoder.pretty.encode(engine).write(to: target.appendingPathComponent("engine.json"))
         reloadInstalled()
     }
@@ -212,4 +252,139 @@ extension JSONEncoder {
         e.dateEncodingStrategy = .iso8601
         return e
     }()
+}
+
+// MARK: - D3DMetal (Apple Game Porting Toolkit)
+
+extension EngineManager {
+    enum D3DMetalError: LocalizedError {
+        case notFound
+        var errorDescription: String? {
+            "Couldn't find D3DMetal in that file. Choose Apple's “Game Porting Toolkit” or “Evaluation environment for Windows games” .dmg, or a folder containing redist/lib."
+        }
+    }
+
+    func reloadD3DMetalImport() {
+        let file = Paths.components.appendingPathComponent("d3dmetal/current.json")
+        d3dmetalImport = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.iso.decode(D3DMetalImport.self, from: $0) }
+        if let i = d3dmetalImport, !FileManager.default.fileExists(atPath: i.lib.path) { d3dmetalImport = nil }
+    }
+
+    /// Imports D3DMetal from Apple's download: the outer GPTK .dmg, the inner "Evaluation environment"
+    /// .dmg, or a folder. Disk images are mounted read-only in MacNative's own folder and always detached.
+    func importD3DMetal(from source: URL) async throws {
+        var mounts: [URL] = []
+        defer {
+            let toDetach = mounts
+            Task.detached {
+                for m in toDetach.reversed() {
+                    _ = try? await Shell.run("/usr/bin/hdiutil", ["detach", m.path, "-force", "-quiet"])
+                    try? FileManager.default.removeItem(at: m)
+                }
+            }
+        }
+
+        func mount(_ dmg: URL) async throws -> URL {
+            let point = Paths.cache.appendingPathComponent("mnt-\(UUID().uuidString.prefix(8))", isDirectory: true)
+            try FileManager.default.createDirectory(at: point, withIntermediateDirectories: true)
+            try await Shell.run("/usr/bin/hdiutil", ["attach", dmg.path, "-readonly", "-nobrowse", "-noverify",
+                                                    "-mountpoint", point.path])
+            mounts.append(point)
+            return point
+        }
+
+        var root = source
+        if source.pathExtension.lowercased() == "dmg" { root = try await mount(source) }
+
+        var redistLib = Self.findRedistLib(in: root)
+        if redistLib == nil {
+            // The outer Game Porting Toolkit image nests the "Evaluation environment" image.
+            let nested = ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [])
+                .first { $0.pathExtension.lowercased() == "dmg" && $0.lastPathComponent.localizedCaseInsensitiveContains("evaluation") }
+            if let nested { redistLib = Self.findRedistLib(in: try await mount(nested)) }
+        }
+        guard let lib = redistLib else { throw D3DMetalError.notFound }
+        try Task.checkCancellation()
+
+        let info = lib.appendingPathComponent("external/D3DMetal.framework/Resources/Info.plist")
+        let version = (NSDictionary(contentsOf: info)?["CFBundleShortVersionString"] as? String) ?? "imported"
+        let entry = D3DMetalImport(version: version, importedAt: .now)
+
+        let fm = FileManager.default
+        try? fm.removeItem(at: entry.directory)
+        try fm.createDirectory(at: entry.directory, withIntermediateDirectories: true)
+        do {
+            // ditto keeps the framework's symlinks intact.
+            try await Shell.run("/usr/bin/ditto", [lib.path, entry.lib.path])
+        } catch {
+            try? fm.removeItem(at: entry.directory)
+            throw error
+        }
+        // Replace any older import.
+        let base = Paths.components.appendingPathComponent("d3dmetal")
+        for old in (try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil)) ?? []
+            where old.lastPathComponent != version && old.lastPathComponent != "current.json" {
+            try? fm.removeItem(at: old)
+        }
+        try JSONEncoder.pretty.encode(entry).write(to: base.appendingPathComponent("current.json"))
+        reloadD3DMetalImport()
+    }
+
+    func removeD3DMetalImport() {
+        try? FileManager.default.removeItem(at: Paths.components.appendingPathComponent("d3dmetal"))
+        for e in installed where e.isGPTK {
+            try? FileManager.default.removeItem(at: e.directory.appendingPathComponent("variants"))
+        }
+        d3dmetalImport = nil
+    }
+
+    /// Finds a `lib` folder laid out like Apple's `redist/lib` (contains `external/D3DMetal.framework`).
+    private static func findRedistLib(in root: URL) -> URL? {
+        let fm = FileManager.default
+        for candidate in [root.appendingPathComponent("redist/lib"), root.appendingPathComponent("lib"), root]
+            where fm.fileExists(atPath: candidate.appendingPathComponent("external/D3DMetal.framework").path) {
+            return candidate
+        }
+        // Shallow search (handles an extra wrapping folder).
+        let e = fm.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey],
+                              options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        while let url = e?.nextObject() as? URL {
+            if e!.level > 4 { e!.skipDescendants(); continue }
+            if url.lastPathComponent == "D3DMetal.framework", url.deletingLastPathComponent().lastPathComponent == "external" {
+                return url.deletingLastPathComponent().deletingLastPathComponent()
+            }
+        }
+        return nil
+    }
+
+    /// The GPTK engine with the imported D3DMetal layered on top, as an APFS clone (Apple's Read Me
+    /// describes the same swap of `lib/external` and the D3D libraries in `lib/wine`).
+    func d3dmetalVariant(of engine: InstalledEngine, using d3d: D3DMetalImport) async throws -> URL {
+        let variant = engine.directory.appendingPathComponent("variants/d3dmetal-\(d3d.version)", isDirectory: true)
+        let wine = variant.appendingPathComponent("wine")
+        if WineContext.wineBinary(in: wine) != nil { return wine }
+
+        let fm = FileManager.default
+        try? fm.removeItem(at: variant)
+        try fm.createDirectory(at: variant, withIntermediateDirectories: true)
+        do {
+            try await Shell.run("/bin/cp", ["-cR", engine.wineRoot.path, wine.path])
+            let external = wine.appendingPathComponent("lib/external")
+            try? fm.removeItem(at: external)
+            try await Shell.run("/usr/bin/ditto", [d3d.lib.appendingPathComponent("external").path, external.path])
+            for arch in ["x86_64-unix", "x86_64-windows", "i386-windows"] {
+                let src = d3d.lib.appendingPathComponent("wine/\(arch)")
+                let dst = wine.appendingPathComponent("lib/wine/\(arch)")
+                for file in (try? fm.contentsOfDirectory(atPath: src.path)) ?? [] {
+                    let to = dst.appendingPathComponent(file)
+                    try? fm.removeItem(at: to)
+                    try fm.copyItem(at: src.appendingPathComponent(file), to: to)
+                }
+            }
+        } catch {
+            try? fm.removeItem(at: variant)
+            throw error
+        }
+        return wine
+    }
 }

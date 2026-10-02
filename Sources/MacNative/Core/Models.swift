@@ -65,6 +65,8 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
     case dxvk
     /// DXMT: D3D10/11 → Metal directly. Fastest for many DX11 titles, still experimental.
     case dxmt
+    /// Apple's D3DMetal (Game Porting Toolkit): D3D11/12 → Metal. The only DirectX 12 path on macOS.
+    case d3dmetal
 
     var id: String { rawValue }
 
@@ -73,6 +75,7 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
         case .wined3d: "WineD3D (OpenGL)"
         case .dxvk: "DXVK (Vulkan → Metal)"
         case .dxmt: "DXMT (Metal)"
+        case .d3dmetal: "D3DMetal (DX12 → Metal)"
         }
     }
 
@@ -81,6 +84,7 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
         case .wined3d: "Built into Wine. Best compatibility for DirectX 9 and older games."
         case .dxvk: "DirectX 10/11 over MoltenVK. Solid default for most DX11 games."
         case .dxmt: "DirectX 10/11 straight to Metal. Often fastest, but experimental."
+        case .d3dmetal: "Apple's translation layer, needed for DirectX 12 games. Uses its own Wine, downloaded on first launch."
         }
     }
 
@@ -89,6 +93,7 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable {
         case .wined3d: nil
         case .dxvk: "dxvk"
         case .dxmt: "dxmt"
+        case .d3dmetal: nil
         }
     }
 }

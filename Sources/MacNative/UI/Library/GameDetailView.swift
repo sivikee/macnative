@@ -190,7 +190,7 @@ struct GameDetailView: View {
             }
             HStack(spacing: 12) {
                 InfoCard(label: "Graphics", value: game.config.graphics.displayName)
-                InfoCard(label: "Engine", value: app.engines.engine(id: game.config.engineID ?? app.settings.defaultEngineID)?.name ?? "None installed")
+                InfoCard(label: "Engine", value: app.engineDescription(for: game.config))
             }
             HStack(spacing: 12) {
                 InfoCard(label: "Play time", value: game.playTimeSeconds > 0 ? Format.playTime(game.playTimeSeconds) : "Never played")

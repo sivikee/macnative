@@ -32,10 +32,12 @@ MacNative is a native SwiftUI app. It borrows its design language and its per-ga
 | DXVK-macOS | Direct3D 10/11 → Vulkan | [Gcenx/DXVK-macOS](https://github.com/Gcenx/DXVK-macOS) |
 | DXMT | Direct3D 10/11 → Metal | [3Shain/dxmt](https://github.com/3Shain/dxmt) |
 | WineD3D | Direct3D 9 and older → OpenGL | Built into Wine |
+| D3DMetal | Direct3D 11/12 → Metal (the DirectX 12 path) | Apple's Game Porting Toolkit, via [Gcenx's GPTK Wine](https://github.com/Gcenx/game-porting-toolkit), downloaded on first use |
 
 **Why not Proton?** Proton is Valve's Linux bundle of Wine, DXVK and VKD3D-Proton, and its binaries only run on Linux. MacNative uses Proton's DirectX layer where macOS can run it: DXVK, via the macOS fork. VKD3D-Proton (DirectX 12 → Vulkan) needs Vulkan features that MoltenVK doesn't provide, so it can't run there. On macOS:
 - Wine's built-in vkd3d already handles some simpler DirectX 12 games.
-- Apple's D3DMetal is the real DirectX 12 path. Its license doesn't allow bundling it, so the user has to download it from Apple.
+- Apple's D3DMetal is the real DirectX 12 path. Pick **D3DMetal** as a game's graphics backend, and on first launch MacNative downloads Gcenx's Game Porting Toolkit Wine, which includes it. Apple's own GPTK Read Me points users to that build.
+- **Bring your own (optional):** to use a newer D3DMetal, such as a beta, download Apple's Game Porting Toolkit `.dmg` with a free Apple ID and import it in Settings → Engines. MacNative layers it over the GPTK Wine using an APFS clone, the same file swap Apple's Read Me describes. Nothing from Apple is stored in this repo.
 
 DXMT needs files inside Wine's own lib folder. DXMT needs files inside Wine's own lib folder. Rather than changing the engine, MacNative makes an APFS clone of it (instant, no extra disk space) and adds DXMT to the clone.
 
@@ -78,7 +80,7 @@ scripts/build.sh
 
 **v0.2 – make more games run**
 - Per-game known-good configs, auto-applied (like GameNative's community configs)
-- DirectX 12 via D3DMetal: guided in-app download of Apple's Game Porting Toolkit (free Apple ID), extracted into the data folder
+- MetalFX (DLSS → MetalFX) toggle for D3DMetal; auto-pick D3DMetal for DX12-only games
 - Pause/resume for downloads (v0.1 can cancel them)
 - Controller navigation inside the settings screens
 - Running state and playtime for Steam games; quit Steam cleanly when a game exits

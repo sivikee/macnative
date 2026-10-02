@@ -12,11 +12,16 @@ struct GameConfigForm: View {
 
     var body: some View {
         SettingsCard(title: "Graphics", subtitle: "How DirectX is translated to Metal") {
-            if showsEngine {
+            if config.graphics == .d3dmetal {
+                SettingsRow(symbol: "wineglass", tint: Theme.pink, title: "Wine engine",
+                            subtitle: "D3DMetal always runs on Apple's Game Porting Toolkit Wine") {
+                    Text(app.engineDescription(for: config)).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+            } else if showsEngine {
                 SettingsRow(symbol: "wineglass", tint: Theme.pink, title: "Wine engine") {
                     Picker("", selection: $config.engineID) {
                         Text("Default").tag(String?.none)
-                        ForEach(app.engines.installed) { e in Text(e.name).tag(String?.some(e.id)) }
+                        ForEach(app.engines.regularEngines) { e in Text(e.name).tag(String?.some(e.id)) }
                     }
                     .labelsHidden().frame(width: 200)
                 }
@@ -28,15 +33,17 @@ struct GameConfigForm: View {
                 }
                 .labelsHidden().frame(width: 200)
             }
-            if config.graphics == .dxvk {
-                toggle("bolt.fill", Theme.warning, "DXVK async shaders", "Less stutter while shaders compile", $config.dxvkAsync)
-                toggle("chart.bar.fill", Theme.success, "DXVK HUD", "FPS and GPU info overlay", $config.dxvkHUD)
+            if config.graphics == .dxvk || config.graphics == .d3dmetal {
                 SettingsRow(symbol: "speedometer", tint: Theme.purple, title: "Frame rate limit") {
                     Picker("", selection: $config.fpsLimit) {
                         ForEach(Self.fpsOptions, id: \.self) { Text($0 == 0 ? "Unlimited" : "\($0) FPS").tag($0) }
                     }
                     .labelsHidden().frame(width: 140)
                 }
+            }
+            if config.graphics == .dxvk {
+                toggle("bolt.fill", Theme.warning, "DXVK async shaders", "Less stutter while shaders compile", $config.dxvkAsync)
+                toggle("chart.bar.fill", Theme.success, "DXVK HUD", "FPS and GPU info overlay", $config.dxvkHUD)
             }
             toggle("gauge.with.dots.needle.67percent", Theme.success, "Metal performance HUD",
                    "Apple's built-in FPS / frame time overlay", $config.metalHUD)

@@ -8,6 +8,8 @@ struct AppSettings: Codable {
     var verboseWineLogging = false
     var keepInstallers = false
     var hasCompletedSetup = false
+    /// Use the D3DMetal imported from Apple instead of the one bundled with the GPTK engine.
+    var useImportedD3DMetal = true
 }
 
 /// A long-running job shown in the UI (engine download, game install, …).
@@ -322,20 +324,71 @@ final class AppState {
 
     func context(prefix: String, config: GameConfig) async throws -> WineContext {
         guard rosettaInstalled else { throw LaunchError.rosettaMissing }
-        guard let engine = engines.engine(id: config.engineID ?? settings.defaultEngineID) else {
-            throw LaunchError.noEngine
-        }
-        var wineRoot = engine.wineRoot
-        if config.graphics == .dxmt {
-            wineRoot = try await engines.dxmtVariant(of: engine)
+        var wineRoot: URL
+        if config.graphics == .d3dmetal {
+            // D3DMetal needs Apple's GPTK Wine, whatever engine the game is otherwise set to.
+            guard let gptk = engines.gptkEngine else { throw LaunchError.noD3DMetalEngine }
+            if settings.useImportedD3DMetal, let d3d = engines.d3dmetalImport {
+                wineRoot = try await engines.d3dmetalVariant(of: gptk, using: d3d)
+            } else {
+                wineRoot = gptk.wineRoot
+            }
+        } else {
+            guard let engine = engines.engine(id: config.engineID ?? settings.defaultEngineID) else {
+                throw LaunchError.noEngine
+            }
+            wineRoot = engine.wineRoot
+            if config.graphics == .dxmt {
+                wineRoot = try await engines.dxmtVariant(of: engine)
+            }
         }
         return WineContext(wineRoot: wineRoot, prefix: Paths.prefixes.appendingPathComponent(prefix),
                            config: config, verboseLogging: settings.verboseWineLogging)
     }
 
+    /// Downloads the GPTK engine the first time a D3DMetal game launches, reporting into `activityID`.
+    private func ensureD3DMetalEngine(_ config: GameConfig, activityID: String, title: String) async throws {
+        guard config.graphics == .d3dmetal, engines.gptkEngine == nil else { return }
+        let release = engines.gptkRelease
+        setActivity(activityID, title, "Downloading DirectX 12 support…", 0)
+        try await engines.install(release, progress: progressHandler(activityID, title, "Downloading DirectX 12 support"))
+        setActivity(activityID, title, "Preparing…", nil)
+    }
+
+    /// Human-readable engine for a config, as shown on the game page.
+    func engineDescription(for config: GameConfig) -> String {
+        if config.graphics == .d3dmetal {
+            guard let gptk = engines.gptkEngine else { return "GPTK (downloads on first launch)" }
+            if settings.useImportedD3DMetal, let d3d = engines.d3dmetalImport { return "\(gptk.name) · D3DMetal \(d3d.version)" }
+            return gptk.name
+        }
+        return engines.engine(id: config.engineID ?? settings.defaultEngineID)?.name ?? "None installed"
+    }
+
+    func installD3DMetalEngine() {
+        let release = engines.gptkRelease
+        startJob("engine:\(release.id)") { [weak self] in await self?.runEngineInstall(release) }
+    }
+
+    func importD3DMetal(from url: URL) {
+        startJob("d3dmetal-import") { [weak self] in
+            guard let self else { return }
+            self.setActivity("d3dmetal-import", "D3DMetal", "Importing from \(url.lastPathComponent)…", nil)
+            defer { self.endActivity("d3dmetal-import") }
+            do {
+                try await self.engines.importD3DMetal(from: url)
+                self.settings.useImportedD3DMetal = true
+            } catch {
+                self.report(error)
+            }
+        }
+    }
+
     /// Stops every Wine process in a prefix without needing a fully prepared context.
     private func killPrefix(_ name: String, config: GameConfig) async {
-        guard let engine = engines.engine(id: config.engineID ?? settings.defaultEngineID) else { return }
+        let engine = config.graphics == .d3dmetal ? engines.gptkEngine
+            : engines.engine(id: config.engineID ?? settings.defaultEngineID)
+        guard let engine else { return }
         await WineRunner.kill(WineContext(wineRoot: engine.wineRoot,
                                           prefix: Paths.prefixes.appendingPathComponent(name), config: config))
     }
@@ -567,11 +620,17 @@ final class AppState {
 
     func isRunning(_ game: Game) -> Bool { running.contains(game.id) }
 
-    func play(_ game: Game) async {
+    /// Prepares (possibly downloading DirectX 12 support first) and launches a game as a cancellable job.
+    func play(_ game: Game) {
         guard !running.contains(game.id) else { return }
+        startJob(game.id) { [weak self] in await self?.runPlay(game) }
+    }
+
+    private func runPlay(_ game: Game) async {
         let id = game.id
         setActivity(id, game.title, "Preparing…", nil)
         do {
+            try await ensureD3DMetalEngine(game.config, activityID: id, title: game.title)
             if game.source == .steam {
                 try await openSteam(arguments: ["-applaunch", game.externalID], config: game.config)
                 endActivity(id)
@@ -580,6 +639,7 @@ final class AppState {
             }
             guard let exe = game.executablePath else { throw GOGService.GOGError.noExecutable }
             let ctx = try await preparedContext(for: game)
+            try Task.checkCancellation()
             let log = Paths.logs.appendingPathComponent("\(game.prefixName).log")
             let process = try WineRunner.launch(
                 ctx, executable: exe, arguments: [],
@@ -620,9 +680,10 @@ final class AppState {
 }
 
 enum LaunchError: LocalizedError {
-    case rosettaMissing, noEngine
+    case rosettaMissing, noEngine, noD3DMetalEngine
     var errorDescription: String? {
         switch self {
+        case .noD3DMetalEngine: "DirectX 12 support isn't downloaded yet. Get it in Settings → Engines."
         case .rosettaMissing: "Rosetta 2 is required. Install it from Settings → System."
         case .noEngine: "No Wine engine installed. Download one in Settings → Engines."
         }

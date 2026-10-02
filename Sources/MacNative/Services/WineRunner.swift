@@ -7,7 +7,13 @@ struct WineContext {
     var config: GameConfig
     var verboseLogging = false
 
-    var wineBinary: URL { wineRoot.appendingPathComponent("bin/wine") }
+    /// `bin/wine` on modern builds, `bin/wine64` on the Wine 7.7-based GPTK build.
+    var wineBinary: URL { Self.wineBinary(in: wineRoot) ?? wineRoot.appendingPathComponent("bin/wine") }
+
+    static func wineBinary(in root: URL) -> URL? {
+        ["bin/wine", "bin/wine64"].map { root.appendingPathComponent($0) }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
     var wineserverBinary: URL { wineRoot.appendingPathComponent("bin/wineserver") }
 
     var environment: [String: String] {
@@ -31,6 +37,8 @@ struct WineContext {
         if config.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
         if config.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
 
+        if config.graphics == .d3dmetal, config.fpsLimit > 0 { env["D3DM_MAX_FPS"] = String(config.fpsLimit) }
+
         if config.graphics == .dxvk {
             if config.dxvkHUD { env["DXVK_HUD"] = "fps,devinfo" }
             if config.dxvkAsync { env["DXVK_ASYNC"] = "1" }
@@ -52,6 +60,8 @@ struct WineContext {
         case .dxvk: parts.append("d3d11,d3d10core=n,b")
         // DXMT lives in the engine variant's builtin folder; WineD3D is plain builtin.
         case .dxmt, .wined3d: parts.append("d3d11,d3d10core,dxgi=b")
+        // The GPTK engine's builtin D3D DLLs are D3DMetal; this also skips DXVK copies left in system32.
+        case .d3dmetal: parts.append("d3d12,d3d11,d3d10,d3d10core,dxgi=b")
         }
         let user = config.dllOverrides.trimmingCharacters(in: .whitespacesAndNewlines)
         if !user.isEmpty { parts.append(user) }

@@ -87,12 +87,12 @@ private struct EnginesSection: View {
     var body: some View {
         @Bindable var app = app
         SettingsCard(title: "Installed engines", subtitle: "Wine builds live inside MacNative's data folder") {
-            if app.engines.installed.isEmpty {
+            if app.engines.regularEngines.isEmpty {
                 SettingsRow(symbol: "exclamationmark.triangle.fill", tint: Theme.warning, title: "No engine installed",
                             subtitle: "Download one below to start playing.") { EmptyView() }
             }
-            ForEach(app.engines.installed) { e in
-                let isDefault = (app.settings.defaultEngineID ?? app.engines.installed.first?.id) == e.id
+            ForEach(app.engines.regularEngines) { e in
+                let isDefault = (app.settings.defaultEngineID ?? app.engines.regularEngines.first?.id) == e.id
                 SettingsRow(symbol: "wineglass.fill", tint: Theme.pink, title: e.name,
                             subtitle: isDefault ? "Default engine" : "Installed \(e.installedAt.formatted(date: .abbreviated, time: .omitted))") {
                     if !isDefault {
@@ -101,7 +101,7 @@ private struct EnginesSection: View {
                     }
                     Button {
                         try? app.engines.uninstall(e)
-                        if app.settings.defaultEngineID == e.id { app.settings.defaultEngineID = app.engines.installed.first?.id }
+                        if app.settings.defaultEngineID == e.id { app.settings.defaultEngineID = app.engines.regularEngines.first?.id }
                     } label: { Image(systemName: "trash") }
                     .buttonStyle(PillButtonStyle(color: Theme.destructive))
                 }
@@ -137,9 +137,9 @@ private struct EnginesSection: View {
                       text: "DirectX 10/11 → Vulkan, via MoltenVK")
             component(EngineManager.dxmt, symbol: "cube.fill", tint: Theme.primaryLight,
                       text: "DirectX 10/11 → Metal (experimental)")
-            SettingsRow(symbol: "lock.fill", tint: Theme.muted, title: "D3DMetal (Apple Game Porting Toolkit)",
-                        subtitle: "DirectX 12 → Metal. Planned as a guided download from Apple, because its license forbids bundling it. Until then, Wine's built-in vkd3d handles some simpler DX12 games.") { EmptyView() }
         }
+
+        D3DMetalCard()
     }
 
     private func component(_ c: ComponentRelease, symbol: String, tint: Color, text: String) -> some View {
@@ -150,6 +150,72 @@ private struct EnginesSection: View {
                 Text("On demand").font(Theme.font(12)).foregroundStyle(Theme.muted)
             }
         }
+    }
+}
+
+// MARK: - DirectX 12
+
+/// D3DMetal: the GPTK engine (auto-downloaded, includes D3DMetal) plus an optional newer D3DMetal from Apple.
+private struct D3DMetalCard: View {
+    @Environment(AppState.self) private var app
+    static let appleDownloads = URL(string: "https://developer.apple.com/download/all/?q=game%20porting%20toolkit")!
+
+    var body: some View {
+        @Bindable var app = app
+        let release = app.engines.gptkRelease
+        let engine = app.engines.gptkEngine
+        let engineJob = "engine:\(release.id)"
+        let importJob = "d3dmetal-import"
+
+        SettingsCard(title: "DirectX 12 (D3DMetal)",
+                     subtitle: "Apple's translation layer. Pick “D3DMetal” as a game's graphics backend to use it") {
+            SettingsRow(symbol: "cpu.fill", tint: Theme.primaryLight,
+                        title: engine?.name ?? release.name,
+                        subtitle: app.activities[engineJob]?.detail ?? (engine != nil
+                            ? "Installed · Wine build from Gcenx with D3DMetal included"
+                            : "Not downloaded · \(Format.bytes(release.sizeBytes)). Downloads automatically the first time a D3DMetal game launches.")) {
+                if let a = app.activities[engineJob] {
+                    GradientProgressBar(progress: a.progress).frame(width: 140)
+                    CancelJobButton(jobID: engineJob)
+                } else if let engine {
+                    Button { try? app.engines.uninstall(engine) } label: { Image(systemName: "trash") }
+                        .buttonStyle(PillButtonStyle(color: Theme.destructive))
+                } else {
+                    Button("Download") { app.installD3DMetalEngine() }.buttonStyle(PillButtonStyle())
+                }
+            }
+
+            let imported = app.engines.d3dmetalImport
+            SettingsRow(symbol: "sparkles", tint: Theme.tertiary,
+                        title: imported.map { "D3DMetal \($0.version) from Apple" } ?? "Use a newer D3DMetal (optional)",
+                        subtitle: app.activities[importJob]?.detail ?? (imported != nil
+                            ? "Layered over the GPTK engine for all D3DMetal games."
+                            : "Download Apple's Game Porting Toolkit (free Apple ID), then import the .dmg or a folder.")) {
+                if app.activities[importJob] != nil {
+                    ProgressView().controlSize(.small)
+                    CancelJobButton(jobID: importJob)
+                } else if imported != nil {
+                    Toggle("", isOn: $app.settings.useImportedD3DMetal).toggleStyle(.switch).tint(Theme.primary).labelsHidden()
+                        .help("Use this D3DMetal instead of the bundled one")
+                    Button { app.engines.removeD3DMetalImport() } label: { Image(systemName: "trash") }
+                        .buttonStyle(PillButtonStyle(color: Theme.destructive))
+                } else {
+                    Button("Get from Apple") { NSWorkspace.shared.open(Self.appleDownloads) }
+                        .buttonStyle(PillButtonStyle(prominent: false))
+                    Button("Import…", action: chooseImport).buttonStyle(PillButtonStyle())
+                }
+            }
+        }
+    }
+
+    private func chooseImport() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.diskImage, .folder]
+        panel.message = "Choose Apple's Game Porting Toolkit .dmg, or a folder containing redist/lib"
+        if panel.runModal() == .OK, let url = panel.url { app.importD3DMetal(from: url) }
     }
 }
 
