@@ -37,6 +37,18 @@
       "config": {
         "graphics": "wined3d"
       }
+    },
+    {
+      "store": "gog",
+      "id": "1458058109",
+      "title": "The Elder Scrolls IV: Oblivion - Game of the Year Edition Deluxe",
+      "status": "works",
+      "revision": 1,
+      "notes": "Runs with DXVK. The installer can't run silently because it has a license page: MacNative retries with the compatibility engine and shows the installer window, so accept the license and click through. Tested installed on and running from an external exFAT drive.",
+      "testedWith": "MacNative 0.1.3, Wine Staging 11.21, Apple M6 Mac mini, macOS 27.2",
+      "config": {
+        "graphics": "dxvk"
+      }
     }
   ]
 }
