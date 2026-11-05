@@ -23,7 +23,8 @@ struct LibraryView: View {
                                          focused: index == app.focusedIndex && app.controllerOrKeyboardActive,
                                          activity: app.activities[game.id],
                                          running: app.isRunning(game),
-                                         compat: app.compat.entry(for: game)?.status)
+                                         compat: app.compat.entry(for: game)?.status,
+                                         driveOffline: app.offlineGames[game.id] != nil)
                                     .id(game.id)
                                     .onTapGesture {
                                         app.focusedIndex = index

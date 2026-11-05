@@ -73,6 +73,9 @@ There are no config files to edit.
 ### 📦 Self-contained
 Everything MacNative creates lives in **one folder**: engines, game prefixes, downloads, Steam libraries, logs, caches and sign-ins. Nothing is installed system-wide. The only exception is Apple's Rosetta 2, which MacNative offers to install through macOS's own installer. **Settings → System → Erase everything** removes it all in one click.
 
+### 💾 Games on an external drive
+**Settings → System → Game install location** sends new Steam and GOG installs to any folder, such as one on an external drive. Games go there and prefixes (including most saves) stay on your Mac, so exFAT drives work. If the drive isn't connected, MacNative still opens normally: those games are marked **Drive not connected** and work again as soon as you plug it back in. GOG installers still need temporary room on your Mac's disk while they download.
+
 ## How it works
 
 ```

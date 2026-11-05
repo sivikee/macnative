@@ -21,8 +21,10 @@ enum SteamInstaller {
         return u
     }
 
-    static func installDirectory(_ app: SteamAppInfo) -> URL {
-        library.appendingPathComponent(app.installDir, isDirectory: true)
+    /// `gamesRoot` is the player's chosen install location; nil keeps games in the data folder.
+    static func installDirectory(_ app: SteamAppInfo, gamesRoot: URL? = nil) -> URL {
+        let base = gamesRoot.map { $0.appendingPathComponent("steam/common", isDirectory: true) } ?? library
+        return base.appendingPathComponent(app.installDir, isDirectory: true)
     }
 
     static func record(_ appID: UInt32) -> SteamInstallRecord? {
@@ -61,7 +63,7 @@ enum SteamInstaller {
         var total: Int64
     }
 
-    static func install(_ app: SteamAppInfo, ownership: SteamOwnership, steam: SteamSession,
+    static func install(_ app: SteamAppInfo, ownership: SteamOwnership, steam: SteamSession, gamesRoot: URL? = nil,
                         progress: @escaping @Sendable (Progress) -> Void) async throws -> SteamInstallRecord {
         let depots = selectDepots(app, ownership: ownership)
         guard !depots.isEmpty else { throw SteamError(message: "\(app.name) has no Windows content you own") }
@@ -87,7 +89,7 @@ enum SteamInstaller {
         }
         if manifests.isEmpty { throw firstError ?? SteamError(message: "\(app.name) has no Windows content you own") }
 
-        let target = installDirectory(app)
+        let target = installDirectory(app, gamesRoot: gamesRoot)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         let stateURL = target.appendingPathComponent(".macnative-download.json")
         let wanted = Dictionary(uniqueKeysWithValues: manifests.map { (String($0.0.depotID), $0.0.gid) })
@@ -120,36 +122,43 @@ enum SteamInstaller {
         // Download chunks with bounded parallelism, writing each straight into its file.
         let writer = FileWriter(root: target)
         let maxInFlight = 12
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            var inFlight = 0
-            var serverHint = 0
-            for item in work {
-                try await writer.prepare(item.file)
-                if item.file.chunks.isEmpty {
-                    await writer.finish(item.file.path)
-                    await tracker.fileCompleted(item.file.path)
-                    continue
-                }
-                await writer.expect(item.file.path, chunks: item.file.chunks.count)
-                for chunk in item.file.chunks {
-                    if inFlight >= maxInFlight {
-                        try await group.next()
-                        inFlight -= 1
+        // Always release file descriptors: open files would stop the player ejecting an external drive.
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                var inFlight = 0
+                var serverHint = 0
+                for item in work {
+                    try await writer.prepare(item.file)
+                    if item.file.chunks.isEmpty {
+                        await writer.finish(item.file.path)
+                        await tracker.fileCompleted(item.file.path)
+                        continue
                     }
-                    serverHint += 1
-                    let hint = serverHint
-                    group.addTask {
-                        let data = try await cdn.chunk(depotID: item.depot, chunk, key: item.key, serverHint: hint)
-                        try await writer.write(data, to: item.file.path, at: chunk.offset)
-                        await tracker.add(Int64(data.count))
-                        if await writer.chunkDone(item.file.path) {
-                            await tracker.fileCompleted(item.file.path)
+                    await writer.expect(item.file.path, chunks: item.file.chunks.count)
+                    for chunk in item.file.chunks {
+                        if inFlight >= maxInFlight {
+                            try await group.next()
+                            inFlight -= 1
                         }
+                        serverHint += 1
+                        let hint = serverHint
+                        group.addTask {
+                            let data = try await cdn.chunk(depotID: item.depot, chunk, key: item.key, serverHint: hint)
+                            try await writer.write(data, to: item.file.path, at: chunk.offset)
+                            await tracker.add(Int64(data.count))
+                            if await writer.chunkDone(item.file.path) {
+                                await tracker.fileCompleted(item.file.path)
+                            }
+                        }
+                        inFlight += 1
                     }
-                    inFlight += 1
                 }
+                try await group.waitForAll()
             }
-            try await group.waitForAll()
+        } catch {
+            await writer.closeAll()
+            await tracker.save()
+            throw error
         }
         await writer.closeAll()
         await tracker.save()
@@ -167,8 +176,7 @@ enum SteamInstaller {
     }
 
     private static func checkFreeSpace(at url: URL, needed: Int64) throws {
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        if let free = values?.volumeAvailableCapacityForImportantUsage, free < needed + 512 << 20 {
+        if let free = InstallLocation.freeBytes(at: url), free < needed + 512 << 20 {
             throw SteamError(message: "Not enough disk space: needs \(Format.bytes(needed)), \(Format.bytes(free)) free")
         }
     }
