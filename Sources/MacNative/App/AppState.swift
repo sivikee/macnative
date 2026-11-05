@@ -12,6 +12,8 @@ struct AppSettings: Codable {
     var useImportedD3DMetal = true
     /// Sync native Steam games' saves with Steam Cloud before launch and after exit.
     var steamCloudSync = true
+    /// Folder new Steam and GOG games install into, e.g. on an external drive. nil = the data folder.
+    var installLocationPath: String?
 }
 
 extension AppSettings {
@@ -26,6 +28,7 @@ extension AppSettings {
         hasCompletedSetup = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedSetup) ?? d.hasCompletedSetup
         useImportedD3DMetal = try c.decodeIfPresent(Bool.self, forKey: .useImportedD3DMetal) ?? d.useImportedD3DMetal
         steamCloudSync = try c.decodeIfPresent(Bool.self, forKey: .steamCloudSync) ?? d.steamCloudSync
+        installLocationPath = try c.decodeIfPresent(String.self, forKey: .installLocationPath)
     }
 }
 
@@ -100,10 +103,22 @@ final class AppState {
     var isGOGLoggedIn = GOGService.loadSession() != nil
     var rosettaInstalled = SystemCheck.isRosettaInstalled
 
+    /// Whether the chosen install location can be used right now.
+    private(set) var installLocationStatus: InstallLocation.Status = .available
+    /// Installed games whose drive isn't connected: game id → drive name. Their records are kept.
+    private(set) var offlineGames: [String: String] = [:]
+
     init() {
         loadSettings()
         loadLibrary()
         showSetup = !settings.hasCompletedSetup || engines.installed.isEmpty || !rosettaInstalled
+        refreshStorage()
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refreshStorage() }
+            }
+        }
     }
 
     // MARK: Library queries
@@ -158,6 +173,75 @@ final class AppState {
 
     private func saveLibrary() {
         try? JSONEncoder.pretty.encode(games).write(to: Paths.libraryFile, options: .atomic)
+        refreshStorage()
+    }
+
+    // MARK: Install location
+
+    /// Re-checks the install location and every installed game's drive.
+    func refreshStorage() {
+        let status = settings.installLocationPath.map { InstallLocation.status(of: URL(fileURLWithPath: $0)) } ?? .available
+        if status != installLocationStatus { installLocationStatus = status }
+        var offline: [String: String] = [:]
+        for g in games where g.isInstalled && !(g.source == .steam && g.config.useSteamClient) {
+            if let path = g.installDirectory ?? g.executablePath,
+               let drive = InstallLocation.missingVolume(of: path) { offline[g.id] = drive }
+        }
+        if offline != offlineGames { offlineGames = offline }
+    }
+
+    /// Sets where new games install, or nil for the data folder. Installed games stay where they are.
+    func setInstallLocation(_ folder: URL?) {
+        if let folder {
+            let status = InstallLocation.statusForChoosing(folder)
+            guard status == .available else {
+                toast = status.message
+                return
+            }
+        }
+        settings.installLocationPath = folder?.path
+        refreshStorage()
+    }
+
+    /// The folder new games go in (nil = the data folder). Throws rather than falling back to the
+    /// internal disk, which a game too big for it is probably being kept away from.
+    private func gamesRoot() throws -> URL? {
+        guard let path = settings.installLocationPath else { return nil }
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        let status = InstallLocation.status(of: folder)
+        guard status == .available else { throw InstallLocation.Failure(status: status) }
+        let root = InstallLocation.gamesRoot(in: folder)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    /// A drive pulled mid-install surfaces as assorted I/O errors; say what actually happened.
+    private func reportInstallFailure(_ error: Error, title: String, target: URL?) {
+        if !Self.isCancellation(error), let target, let drive = InstallLocation.missingVolume(of: target.path) {
+            toast = "“\(drive)” was disconnected while installing \(title). Reconnect it and press Install to try again."
+        } else {
+            report(error)
+        }
+    }
+
+    /// Removing a game while its drive is away would strand its files there. Returns true if blocked.
+    private func blockedByMissingDrive(_ game: Game, action: String) -> Bool {
+        guard let dir = game.installDirectory, let drive = InstallLocation.missingVolume(of: dir) else { return false }
+        toast = "Connect “\(drive)” to \(action) \(game.title)."
+        refreshStorage()
+        return true
+    }
+
+    /// Marks a game on a missing drive as not installed. Its files stay on the drive and its prefix
+    /// (which holds its saves) is kept, for drives that aren't coming back.
+    func forgetInstall(_ game: Game) {
+        if game.source == .steam, let appID = UInt32(game.externalID) { SteamInstaller.removeRecord(appID) }
+        update(game.id) {
+            $0.installState = .notInstalled
+            $0.executablePath = nil
+            $0.installDirectory = nil
+            $0.installSizeBytes = nil
+        }
     }
 
     // MARK: Activities
@@ -587,7 +671,16 @@ final class AppState {
         let id = game.id
         setActivity(id, game.title, "Fetching installer…", nil)
         defer { endActivity(id) }
-        let dir = Paths.downloads.appendingPathComponent("gog-\(game.externalID)", isDirectory: true)
+        let root: URL?
+        do { root = try gamesRoot() } catch { report(error); return }
+        let dir = (root?.appendingPathComponent("downloads", isDirectory: true) ?? Paths.downloads)
+            .appendingPathComponent("gog-\(game.externalID)", isDirectory: true)
+        let folder = Format.safeFolderName(game.title)
+        // Only the game moves: its prefix stays on the data folder's disk, because Wine prefixes need
+        // symlinks that external drives formatted as exFAT can't hold.
+        let installDir = root?.appendingPathComponent("gog/\(folder) (\(game.externalID))", isDirectory: true)
+            ?? Paths.prefixes.appendingPathComponent("\(game.prefixName)/drive_c/Games/\(folder)", isDirectory: true)
+        let windowsDir = root != nil ? SteamLauncher.windowsPath(installDir) : "C:\\Games\\\(folder)"
         var installerStarted = false
         do {
             let files = try await GOGService.installerFiles(gameID: game.externalID)
@@ -622,16 +715,16 @@ final class AppState {
             try Task.checkCancellation()
             setActivity(id, game.title, "Installing…", nil)
             installerStarted = true
-            let folder = Format.safeFolderName(game.title)
-            let installDir = Paths.prefixes.appendingPathComponent("\(game.prefixName)/drive_c/Games/\(folder)", isDirectory: true)
 
             var task: GOGService.PlayTask?
             do {
                 let ctx = try await preparedContext(for: game)
-                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game)
+                try await runGOGInstaller(ctx, setup: setup, windowsDir: windowsDir, game: game)
                 task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID)
                 if task == nil { throw GOGService.GOGError.noExecutable }
             } catch where !Self.isCancellation(error) {
+                // A compatibility retry can't help if the drive has gone away.
+                if InstallLocation.missingVolume(of: installDir.path) != nil { throw error }
                 // Some GOG installers (32-bit Inno Setup with custom UI) crash under new Wine on macOS.
                 // Retry once in a fresh prefix with the Game Porting Toolkit Wine, which handles them.
                 // The game itself still runs on the engine chosen in its settings.
@@ -645,7 +738,7 @@ final class AppState {
                 let ctx = try await context(prefix: game.prefixName, config: compat)
                 try await WineRunner.preparePrefix(ctx)
                 // Installers with a EULA page can't be accepted silently, so show the wizard here.
-                try await runGOGInstaller(ctx, setup: setup, folder: folder, game: game, interactive: true)
+                try await runGOGInstaller(ctx, setup: setup, windowsDir: windowsDir, game: game, interactive: true)
                 task = GOGService.primaryPlayTask(installDir: installDir, gameID: game.externalID)
             }
 
@@ -669,9 +762,10 @@ final class AppState {
                 if installerStarted {
                     await killPrefix(game.prefixName, config: game.config)
                     try? FileManager.default.removeItem(at: Paths.prefixes.appendingPathComponent(game.prefixName))
+                    try? FileManager.default.removeItem(at: installDir)
                 }
             }
-            report(error)
+            reportInstallFailure(error, title: game.title, target: installDir)
         }
     }
 
@@ -680,20 +774,23 @@ final class AppState {
         let id = game.id
         setActivity(id, game.title, "Connecting to Steam…", nil)
         defer { endActivity(id) }
+        var target: URL?
         do {
+            let root = try gamesRoot()
+            target = root
             try await steam.ensureOnline()
             guard let appID = UInt32(game.externalID), let app = steam.apps[appID], let owned = steam.ownership else {
                 throw SteamError(message: "Steam hasn't sent details for \(game.title) yet. Try Sync in Settings → Accounts.")
             }
             let title = game.title
-            let record = try await SteamInstaller.install(app, ownership: owned, steam: steam.session) { [weak self] p in
+            let record = try await SteamInstaller.install(app, ownership: owned, steam: steam.session, gamesRoot: root) { [weak self] p in
                 let fraction = p.total > 0 ? Double(p.done) / Double(p.total) : nil
                 let text = p.total > 0 ? "\(p.phase) · \(Format.bytes(p.done)) of \(Format.bytes(p.total))" : p.phase
                 Task { @MainActor in self?.updateProgress(id, title, text, fraction) }
             }
             update(id) { self.applySteamInstall(&$0, app: app, record: record) }
         } catch {
-            report(error)
+            reportInstallFailure(error, title: game.title, target: target)
         }
     }
 
@@ -703,6 +800,8 @@ final class AppState {
         g.installState = .installed
         g.installDirectory = record.installDir
         g.installSizeBytes = record.sizeOnDisk
+        // Nothing can be checked on a missing drive; don't replace a launch target the player chose.
+        if InstallLocation.missingVolume(of: record.installDir) != nil { return }
         if let exe = g.executablePath, FileManager.default.fileExists(atPath: exe) { return }
         let dir = URL(fileURLWithPath: record.installDir)
         if let launch = app.bestLaunchOption(installDir: dir) { setSteamLaunch(&g, launch, installDir: dir) }
@@ -727,7 +826,7 @@ final class AppState {
     }
 
     /// Runs a GOG Inno Setup installer silently, keeping both our log and Inno's own log.
-    private func runGOGInstaller(_ ctx: WineContext, setup: URL, folder: String, game: Game,
+    private func runGOGInstaller(_ ctx: WineContext, setup: URL, windowsDir: String, game: Game,
                                  interactive: Bool = false) async throws {
         let innoLog = ctx.prefix.appendingPathComponent("drive_c/macnative-install.log")
         defer {
@@ -737,7 +836,7 @@ final class AppState {
         }
         try await WineRunner.runToCompletion(ctx, executable: setup.path, arguments: [
             "/NORESTART", "/NOICONS",
-            "/DIR=C:\\Games\\\(folder)", "/LOG=C:\\macnative-install.log",
+            "/DIR=\(windowsDir)", "/LOG=C:\\macnative-install.log",
         ] + (interactive ? [] : ["/SILENT"]), log: Paths.logs.appendingPathComponent("install-\(game.externalID).log"))
     }
 
@@ -746,6 +845,7 @@ final class AppState {
         case .steam where game.config.useSteamClient:
             do { try await openSteam(arguments: ["steam://uninstall/\(game.externalID)"], config: game.config) } catch { report(error) }
         case .steam:
+            if blockedByMissingDrive(game, action: "uninstall") { return }
             if let appID = UInt32(game.externalID) { SteamInstaller.uninstall(appID) }
             update(game.id) {
                 $0.installState = .notInstalled
@@ -754,8 +854,10 @@ final class AppState {
                 $0.installSizeBytes = nil
             }
         case .gog:
-            // Each GOG game owns its prefix, so removing the prefix removes the game completely.
+            if blockedByMissingDrive(game, action: "uninstall") { return }
+            // Each GOG game owns its prefix and install folder (usually inside the prefix).
             try? FileManager.default.removeItem(at: Paths.prefixes.appendingPathComponent(game.prefixName))
+            if let dir = game.installDirectory { try? FileManager.default.removeItem(atPath: dir) }
             update(game.id) {
                 $0.installState = .notInstalled
                 $0.executablePath = nil
@@ -786,9 +888,20 @@ final class AppState {
         }
 
         setActivity("erase", "Erasing", "Deleting files…", nil)
-        let items = Paths.ownedItems
+        // Games and downloads outside the data folder, as long as their drive is connected.
+        var items = Paths.ownedItems
+        var missingDrives: Set<String> = []
+        var outside = games.filter { $0.source != .custom }.compactMap(\.installDirectory)
+        if let path = settings.installLocationPath {
+            outside.append(InstallLocation.gamesRoot(in: URL(fileURLWithPath: path, isDirectory: true)).path)
+        }
+        for path in outside where path != Paths.root.path && !path.hasPrefix(Paths.root.path + "/") {
+            if let drive = InstallLocation.missingVolume(of: path) { missingDrives.insert(drive) }
+            else { items.append(URL(fileURLWithPath: path)) }
+        }
+        let erase = items
         await Task.detached {
-            for url in items { try? FileManager.default.removeItem(at: url) }
+            for url in erase { try? FileManager.default.removeItem(at: url) }
         }.value
         URLCache.shared.removeAllCachedResponses()
 
@@ -802,7 +915,11 @@ final class AppState {
         filter = .all
         focusedIndex = 0
         settings = AppSettings()
+        refreshStorage()
         showSetup = true
+        if !missingDrives.isEmpty {
+            toast = "Games on \(missingDrives.sorted().joined(separator: ", ")) weren't deleted because the drive isn't connected."
+        }
     }
 
     // MARK: Custom games
@@ -837,6 +954,13 @@ final class AppState {
     private func runPlay(_ game: Game) async {
         var game = game
         let id = game.id
+        if !(game.source == .steam && game.config.useSteamClient),
+           let path = game.installDirectory ?? game.executablePath,
+           let drive = InstallLocation.missingVolume(of: path) {
+            toast = "Connect “\(drive)” to play \(game.title)."
+            refreshStorage()
+            return
+        }
         setActivity(id, game.title, "Preparing…", nil)
         // D3DMetal only runs 64-bit DirectX 11/12 games; older 32-bit games use the regular engine.
         if game.config.graphics == .d3dmetal, let exe = game.executablePath,
@@ -916,6 +1040,13 @@ final class AppState {
     }
 
     private func uploadCloudSaves(_ cloud: SteamCloud, gameID: String, title: String) async {
+        // Saves kept in the game folder would look deleted, and the upload would delete them from
+        // Steam Cloud too. Leave everything alone; the next session after reconnecting syncs it.
+        if let drive = InstallLocation.missingVolume(of: cloud.installDir.path) {
+            await cloud.signalExit(uploadsRequired: true, uploadsCompleted: false)
+            toast = "“\(drive)” was disconnected, so cloud saves for \(title) weren't uploaded. They'll upload after your next session."
+            return
+        }
         setActivity(gameID, title, "Uploading cloud saves…", nil)
         defer { endActivity(gameID) }
         do {

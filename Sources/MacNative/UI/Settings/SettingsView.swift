@@ -343,6 +343,18 @@ private struct SystemSection: View {
             SettingsRow(symbol: "externaldrive.fill", tint: Theme.statusAvailable, title: "Data folder", subtitle: Paths.root.path) {
                 Button("Reveal") { NSWorkspace.shared.open(Paths.root) }.buttonStyle(PillButtonStyle(prominent: false))
             }
+            let locationOK = app.installLocationStatus == .available
+            SettingsRow(symbol: locationOK ? "arrow.down.to.line" : "externaldrive.badge.xmark",
+                        tint: locationOK ? Theme.statusAvailable : Theme.warning,
+                        title: "Game install location",
+                        subtitle: locationOK
+                            ? (app.settings.installLocationPath ?? "Data folder") + ". Used for new installs; installed games stay where they are."
+                            : app.installLocationStatus.message) {
+                if app.settings.installLocationPath != nil {
+                    Button("Use data folder") { app.setInstallLocation(nil) }.buttonStyle(PillButtonStyle(prominent: false))
+                }
+                Button("Choose…", action: chooseInstallLocation).buttonStyle(PillButtonStyle(prominent: false))
+            }
             SettingsRow(symbol: "shippingbox", tint: Theme.purple, title: "Keep GOG installers",
                         subtitle: "Keep the downloaded setup files after installing") {
                 Toggle("", isOn: $app.settings.keepInstallers).toggleStyle(.switch).tint(Theme.primary).labelsHidden()
@@ -372,7 +384,7 @@ private struct SystemSection: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This stops any running games and permanently deletes every installed game, its saves, all Wine engines, downloads, your GOG sign-in and all settings. Steam cloud saves are not affected. This can't be undone.")
+            Text("This stops any running games and permanently deletes every installed game (including those on connected external drives), its saves, all Wine engines, downloads, your GOG sign-in and all settings. Steam cloud saves are not affected. This can't be undone.")
         }
 
         SettingsCard(title: "Debug") {
@@ -387,6 +399,18 @@ private struct SystemSection: View {
                 Button("Open") { app.showSetup = true }.buttonStyle(PillButtonStyle(prominent: false))
             }
         }
+    }
+
+    private func chooseInstallLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Volumes", isDirectory: true)
+        panel.prompt = "Use Folder"
+        panel.message = "Choose where new games install. Pick an external drive to keep them off your Mac's disk."
+        if panel.runModal() == .OK, let url = panel.url { app.setInstallLocation(url) }
     }
 }
 

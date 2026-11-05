@@ -122,7 +122,10 @@ struct GameDetailView: View {
         if game.source == .steam {
             Button("Open Steam") { Task { try? await app.openSteam(arguments: []) } }
         }
-        if game.isInstalled || game.source == .custom {
+        if let drive = app.offlineGames[game.id], game.source != .custom {
+            Divider()
+            Button("Forget install (files stay on “\(drive)”)", role: .destructive) { app.forgetInstall(game) }
+        } else if game.isInstalled || game.source == .custom {
             Divider()
             Button(game.source == .custom ? "Remove from library" : "Uninstall", role: .destructive) {
                 Task { await app.uninstall(game) }
@@ -138,6 +141,7 @@ struct GameDetailView: View {
         let cancellable = app.canCancel(game.id)
         let (label, symbol, color): (String, String, Color) =
             running ? ("Stop", "stop.fill", Theme.danger)
+            : app.offlineGames[game.id] != nil && activity == nil ? ("Drive not connected", "externaldrive.badge.xmark", Theme.muted)
             : activity != nil ? (activity!.progress.map { "\(Int($0 * 100))%" } ?? "Working…",
                                  cancellable ? "xmark" : "arrow.down", Theme.statusDownloading)
             : game.isInstalled ? ("Play", "play.fill", Theme.statusInstalled)
@@ -188,8 +192,12 @@ struct GameDetailView: View {
             if let entry = app.compat.entry(for: game) { CompatPanel(entry: entry, customized: game.configCustomized == true) }
             Text("Game information").font(Theme.font(18, .semibold)).padding(.bottom, 4)
             HStack(spacing: 12) {
-                InfoCard(label: "Status", value: app.isRunning(game) ? "Running" : game.isInstalled ? "Installed" : "Not installed",
-                         statusColor: app.isRunning(game) ? Theme.tertiary : game.isInstalled ? Theme.statusInstalled : Theme.muted)
+                InfoCard(label: "Status", value: app.isRunning(game) ? "Running"
+                            : app.offlineGames[game.id].map { "“\($0)” not connected" }
+                            ?? (game.isInstalled ? "Installed" : "Not installed"),
+                         statusColor: app.isRunning(game) ? Theme.tertiary
+                            : app.offlineGames[game.id] != nil ? Theme.warning
+                            : game.isInstalled ? Theme.statusInstalled : Theme.muted)
                 InfoCard(label: "Size", value: game.installSizeBytes.map(Format.bytes) ?? "—")
             }
             HStack(spacing: 12) {

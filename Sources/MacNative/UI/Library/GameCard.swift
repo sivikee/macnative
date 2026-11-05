@@ -8,6 +8,8 @@ struct GameCard: View {
     var activity: Activity?
     var running: Bool
     var compat: CompatEntry.Status?
+    /// The drive holding this installed game isn't connected.
+    var driveOffline = false
     @State private var hover = false
 
     var body: some View {
@@ -32,6 +34,8 @@ struct GameCard: View {
                     Spacer(minLength: 0)
                     if running {
                         statusChip("play.fill", Theme.tertiary)
+                    } else if driveOffline {
+                        statusChip("externaldrive.badge.xmark", Theme.warning)
                     } else if game.isInstalled {
                         statusChip("checkmark", Theme.statusInstalled)
                     }
